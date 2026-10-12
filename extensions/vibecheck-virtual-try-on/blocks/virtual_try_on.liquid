@@ -1,0 +1,118 @@
+{{ 'vibecheck.css' | asset_url | stylesheet_tag }}
+<script src="{{ 'vibecheck.js' | asset_url }}" defer="defer"></script>
+
+<div class="vibecheck-tryon" data-vibecheck>
+  <button
+    type="button"
+    class="vibecheck-button"
+    data-vibecheck-open
+    aria-haspopup="dialog"
+    aria-expanded="false"
+  >
+    <span aria-hidden="true">✨</span>
+    {{ block.settings.button_text }}
+  </button>
+
+  <div class="vibecheck-modal" data-vibecheck-modal aria-hidden="true" hidden>
+    <button
+      type="button"
+      class="vibecheck-overlay"
+      data-vibecheck-close
+      aria-label="Close virtual try-on"
+    ></button>
+
+    <section
+      class="vibecheck-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="vibecheck-title-{{ block.id }}"
+      tabindex="-1"
+    >
+      <button
+        type="button"
+        class="vibecheck-close"
+        data-vibecheck-close
+        aria-label="Close virtual try-on"
+      >×</button>
+
+      <header class="vibecheck-header">
+        <span class="vibecheck-badge">VIBECHECK EXPERIENCE</span>
+        <h2 id="vibecheck-title-{{ block.id }}">Virtual Try-On</h2>
+        <p>Choose how you'd like to try this product.</p>
+      </header>
+
+      <div class="vibecheck-options" data-vibecheck-options>
+        <button type="button" class="vibecheck-option" data-vibecheck-camera>
+          <span class="vibecheck-option-icon" aria-hidden="true">📷</span>
+          <strong>Live Camera</strong>
+          <small>Use your camera for a live preview</small>
+          <span class="vibecheck-option-cta">Open camera →</span>
+        </button>
+
+        <button type="button" class="vibecheck-option" data-vibecheck-upload>
+          <span class="vibecheck-option-icon" aria-hidden="true">🖼️</span>
+          <strong>Upload Photo</strong>
+          <small>Choose a photo from your device</small>
+          <span class="vibecheck-option-cta">Choose photo →</span>
+        </button>
+      </div>
+
+      <input type="file" accept="image/*" hidden data-vibecheck-file>
+
+      <div class="vibecheck-preview" data-vibecheck-preview hidden>
+        <div class="vibecheck-preview-topline">
+          <strong data-vibecheck-preview-title>Preview</strong>
+          <span class="vibecheck-live-indicator" data-vibecheck-live-indicator hidden>
+            LIVE
+          </span>
+        </div>
+
+        <div class="vibecheck-media-frame">
+          <video
+            class="vibecheck-video"
+            data-vibecheck-video
+            autoplay
+            playsinline
+            muted
+            hidden
+          ></video>
+          <img
+            class="vibecheck-image"
+            data-vibecheck-image
+            alt="Your photo preview"
+            hidden
+          >
+        </div>
+
+        <div class="vibecheck-preview-actions">
+          <button type="button" class="vibecheck-secondary-button" data-vibecheck-back>
+            ← Choose another option
+          </button>
+          <button type="button" class="vibecheck-primary-button" data-vibecheck-capture hidden>
+            Capture photo
+          </button>
+        </div>
+      </div>
+
+      <p class="vibecheck-status" data-vibecheck-status role="status" aria-live="polite"></p>
+      <p class="vibecheck-privacy-note">
+        Your camera starts only after you select Live Camera. Close this window to stop it.
+      </p>
+    </section>
+  </div>
+</div>
+
+{% schema %}
+{
+  "name": "Virtual Try-On",
+  "target": "section",
+  "settings": [
+    {
+      "type": "text",
+      "id": "button_text",
+      "label": "Button text",
+      "default": "Virtual Try-On"
+    }
+  ]
+}
+{% endschema %}

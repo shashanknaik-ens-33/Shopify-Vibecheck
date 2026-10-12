@@ -1,0 +1,386 @@
+.vibecheck-tryon {
+  width: 100%;
+  margin: 18px 0;
+  color: #171717;
+  font-family: inherit;
+}
+
+.vibecheck-tryon *,
+.vibecheck-modal * {
+  box-sizing: border-box;
+}
+
+.vibecheck-tryon button {
+  font: inherit;
+}
+
+.vibecheck-tryon [hidden],
+.vibecheck-modal[hidden],
+.vibecheck-modal [hidden] {
+  display: none !important;
+}
+
+/* Main product-page button — normal Shopify button size */
+.vibecheck-button {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: auto !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  padding: 8px 14px !important;
+  margin: 8px 0 !important;
+  border: 1px solid #d1d5db !important;
+  border-radius: 6px !important;
+  background: #fff !important;
+  color: #171717 !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  letter-spacing: normal;
+  line-height: 1.4;
+  cursor: pointer;
+  box-shadow: none !important;
+  transition: background .18s ease, border-color .18s ease;
+}
+
+.vibecheck-button:hover {
+  background: #f5f5f5 !important;
+  border-color: #999 !important;
+  transform: none;
+  box-shadow: none !important;
+}
+
+.vibecheck-button:focus-visible,
+.vibecheck-tryon button:focus-visible {
+  outline: 3px solid #8b9cff;
+  outline-offset: 3px;
+}
+
+/* Full-screen modal */
+.vibecheck-modal {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2147483000 !important;
+  display: none !important;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  isolation: isolate;
+}
+
+.vibecheck-modal.is-open {
+  display: flex !important;
+}
+
+.vibecheck-overlay {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: rgba(10, 10, 12, .72) !important;
+  backdrop-filter: blur(7px);
+  cursor: default;
+}
+
+.vibecheck-panel {
+  position: relative !important;
+  z-index: 1 !important;
+  width: min(100%, 560px);
+  max-height: min(88vh, 820px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 32px;
+  border: 1px solid rgba(255, 255, 255, .65);
+  border-radius: 24px;
+  background: #fff !important;
+  color: #171717 !important;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, .3);
+  animation: vibecheck-enter .2s ease-out;
+}
+
+@keyframes vibecheck-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Close button */
+.vibecheck-close {
+  position: absolute !important;
+  top: 14px;
+  right: 14px;
+  display: grid !important;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 50% !important;
+  background: #f3f3f3 !important;
+  color: #171717 !important;
+  font-size: 28px !important;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.vibecheck-close:hover {
+  background: #e7e7e7 !important;
+}
+
+/* Modal heading */
+.vibecheck-header {
+  padding: 8px 24px 26px;
+  text-align: center;
+}
+
+.vibecheck-badge {
+  display: inline-block;
+  padding: 7px 11px;
+  border-radius: 30px;
+  background: #f3f1ed;
+  color: #59534a;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 1.3px;
+}
+
+.vibecheck-header h2 {
+  margin: 15px 0 8px;
+  color: #111;
+  font-size: clamp(25px, 5vw, 32px);
+  line-height: 1.15;
+  letter-spacing: -.7px;
+}
+
+.vibecheck-header p {
+  margin: 0;
+  color: #6c6c6c;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+/* Live Camera and Upload Photo cards */
+.vibecheck-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.vibecheck-option {
+  display: flex !important;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  min-height: 205px;
+  margin: 0 !important;
+  padding: 22px;
+  border: 1px solid #e5e5e5 !important;
+  border-radius: 18px !important;
+  background: #fff !important;
+  color: #151515 !important;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+
+.vibecheck-option:hover {
+  border-color: #222 !important;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, .07);
+}
+
+.vibecheck-option-icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 17px;
+  border-radius: 14px;
+  background: #f5f4f1;
+  font-size: 25px;
+}
+
+.vibecheck-option strong {
+  margin-bottom: 6px;
+  color: #111;
+  font-size: 16px;
+}
+
+.vibecheck-option small {
+  color: #777;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.vibecheck-option-cta {
+  margin-top: auto;
+  padding-top: 18px;
+  color: #111;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* Camera and photo preview */
+.vibecheck-preview {
+  margin-top: 4px;
+}
+
+.vibecheck-preview-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+
+.vibecheck-live-indicator {
+  color: #c62828;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+.vibecheck-media-frame {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #101010;
+}
+
+.vibecheck-video,
+.vibecheck-image {
+  display: block;
+  width: 100%;
+  max-height: min(52vh, 480px);
+  object-fit: contain;
+  background: #101010;
+}
+
+.vibecheck-image {
+  background: #f6f6f6;
+}
+
+.vibecheck-preview-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.vibecheck-secondary-button,
+.vibecheck-primary-button {
+  flex: 1;
+  min-height: 46px;
+  padding: 10px 14px;
+  border: 1px solid #ddd !important;
+  border-radius: 10px !important;
+  background: #fff !important;
+  color: #111 !important;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.vibecheck-primary-button {
+  border-color: #111 !important;
+  background: #111 !important;
+  color: #fff !important;
+}
+
+.vibecheck-status {
+  min-height: 18px;
+  margin: 15px 0 0;
+  color: #565656;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.vibecheck-privacy-note {
+  margin: 14px 0 0;
+  color: #888;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* Mobile layout */
+@media (max-width: 600px) {
+  .vibecheck-modal {
+    padding: 10px;
+  }
+
+  .vibecheck-panel {
+    width: 100%;
+    max-height: 92vh;
+    padding: 25px 18px 20px;
+    border-radius: 20px;
+  }
+
+  .vibecheck-header {
+    padding: 12px 24px 22px;
+  }
+
+  .vibecheck-options {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .vibecheck-option {
+    display: grid !important;
+    grid-template-columns: 48px minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    column-gap: 13px;
+    align-items: center;
+    min-height: 105px;
+    padding: 14px;
+  }
+
+  .vibecheck-option-icon {
+    grid-column: 1;
+    grid-row: 1 / span 3;
+    margin: 0;
+  }
+
+  .vibecheck-option strong {
+    grid-column: 2;
+    margin: 0;
+  }
+
+  .vibecheck-option small {
+    grid-column: 2;
+  }
+
+  .vibecheck-option-cta {
+    grid-column: 2;
+    margin: 0;
+    padding-top: 5px;
+  }
+
+  .vibecheck-preview-actions {
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vibecheck-panel,
+  .vibecheck-button,
+  .vibecheck-option {
+    animation: none;
+    transition: none;
+  }
+}

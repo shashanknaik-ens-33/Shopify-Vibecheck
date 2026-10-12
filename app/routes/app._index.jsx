@@ -1,339 +1,466 @@
-import { useEffect } from "react";
-import { useFetcher } from "react-router";
-import { useAppBridge } from "@shopify/app-bridge-react";
-import { boundary } from "@shopify/shopify-app-react-router/server";
+import { useState } from "react";
+import { useLoaderData, useNavigate } from "react-router";
 import { authenticate } from "../shopify.server";
 
-export const loader = async ({ request }) => {
-  await authenticate.admin(request);
-
-  return null;
-};
-
-export const action = async ({ request }) => {
+export async function loader({ request }) {
   const { admin } = await authenticate.admin(request);
-  const color = ["Red", "Orange", "Yellow", "Green"][
-    Math.floor(Math.random() * 4)
-  ];
-  const response = await admin.graphql(
-    `#graphql
-      mutation populateProduct($product: ProductCreateInput!) {
-        productCreate(product: $product) {
-          product {
+
+  try {
+    const response = await admin.graphql(`
+      query VibecheckProducts {
+        products(first: 50, sortKey: TITLE) {
+          nodes {
             id
             title
             handle
+            productType
+            tags
             status
-            variants(first: 10) {
-              edges {
-                node {
-                  id
-                  price
-                  barcode
-                  createdAt
-                }
-              }
-            }
-            demoInfo: metafield(namespace: "$app", key: "demo_info") {
-              jsonValue
+            featuredImage {
+              url
+              altText
             }
           }
         }
-      }`,
-    {
-      variables: {
-        product: {
-          title: `${color} Snowboard`,
-          metafields: [
-            {
-              namespace: "$app",
-              key: "demo_info",
-              value: "Created by React Router Template",
-            },
-          ],
-        },
-      },
-    },
-  );
-  const responseJson = await response.json();
-  const product = responseJson.data.productCreate.product;
-  const variantId = product.variants.edges[0].node.id;
-  const variantResponse = await admin.graphql(
-    `#graphql
-    mutation shopifyReactRouterTemplateUpdateVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-      productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-        productVariants {
-          id
-          price
-          barcode
-          createdAt
-        }
       }
-    }`,
-    {
-      variables: {
-        productId: product.id,
-        variants: [{ id: variantId, price: "100.00" }],
-      },
-    },
-  );
-  const variantResponseJson = await variantResponse.json();
-  const metaobjectResponse = await admin.graphql(
-    `#graphql
-    mutation shopifyReactRouterTemplateUpsertMetaobject($handle: MetaobjectHandleInput!, $values: JSON!) {
-      metaobjectUpsert(handle: $handle, values: $values) {
-        metaobject {
-          id
-          handle
-          values
-        }
-        userErrors {
-          field
-          message
-        }
-      }
-    }`,
-    {
-      variables: {
-        handle: {
-          type: "$app:example",
-          handle: "demo-entry",
-        },
-        values: {
-          title: "Demo Entry",
-          description:
-            "This metaobject was created by the Shopify app template to demonstrate the metaobject API.",
-        },
-      },
-    },
-  );
-  const metaobjectResponseJson = await metaobjectResponse.json();
+    `);
 
-  return {
-    product: responseJson.data.productCreate.product,
-    variant: variantResponseJson.data.productVariantsBulkUpdate.productVariants,
-    metaobject: metaobjectResponseJson.data.metaobjectUpsert.metaobject,
-  };
-};
+    const result = await response.json();
+
+    if (result.errors?.length) {
+      return {
+        products: [],
+        error: result.errors.map((item) => item.message).join("; "),
+      };
+    }
+
+    const products = (result.data?.products?.nodes ?? []).map(
+      (product) => {
+        const normalize = (value) =>
+          String(value ?? "")
+            .toLowerCase()
+            .replace(/[_-]+/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+
+        const title = normalize(product.title);
+        const productType = normalize(product.productType);
+        const tags = (product.tags ?? []).map(normalize);
+        const searchableText = [title, productType, ...tags].join(" ");
+
+        let category = "Unsupported";
+        let effectReady = false;
+
+        // Lipstick and lip products
+        if (
+          /\b(lipsticks?|lip gloss(?:es)?|lipgloss(?:es)?|lip tints?|lip stains?|lip colors?|lip colours?)\b/.test(
+            searchableText
+          )
+        ) {
+          category = "Lipstick";
+        }
+
+        // Headbands and hair accessories
+        else if (
+          /\b(headbands?|hair bands?|alice bands?|head wraps?)\b/.test(
+            searchableText
+          )
+        ) {
+          category = "Headbands";
+        }
+
+        // Glasses and eyewear
+        else if (
+          /\b(glasses|eyeglasses|sunglasses|spectacles|eyewear|optical frames?|reading glasses)\b/.test(
+            searchableText
+          )
+        ) {
+          category = "Glasses";
+          effectReady = true;
+        }
+
+        // Clothing and apparel
+        else if (
+          /\b(t shirts?|tshirts?|tees|shirts?|tops|blouses|dresses|hoodies|sweatshirts|jackets|coats|sweaters|jeans|trousers|pants|shorts|skirts|leggings|jumpsuits|rompers|cardigans)\b/.test(
+            searchableText
+          )
+        ) {
+          category = "Clothing";
+        }
+
+        return {
+          ...product,
+          category,
+          effectReady,
+        };
+      }
+    );
+
+    return { products, error: null };
+  } catch (error) {
+    return {
+      products: [],
+      error:
+        error instanceof Error
+          ? error.message
+          : "Unable to load Shopify products.",
+    };
+  }
+}
 
 export default function Index() {
-  const fetcher = useFetcher();
-  const shopify = useAppBridge();
-  const isLoading =
-    ["loading", "submitting"].includes(fetcher.state) &&
-    fetcher.formMethod === "POST";
+  const navigate = useNavigate();
+  const { products, error } = useLoaderData();
 
-  useEffect(() => {
-    if (fetcher.data?.product?.id) {
-      shopify.toast.show("Product created");
+  const [cameraEnabled, setCameraEnabled] = useState(true);
+  const [uploadEnabled, setUploadEnabled] = useState(true);
+  const [autoDetect, setAutoDetect] = useState(true);
+  const [filter, setFilter] = useState("All");
+
+  function openTryOn(product) {
+    if (!autoDetect || product.category === "Unsupported") {
+      return;
     }
-  }, [fetcher.data?.product?.id, shopify]);
-  const generateProduct = () => fetcher.submit({}, { method: "POST" });
+
+    const params = new URLSearchParams({
+      id: product.id,
+      title: product.title,
+      category: product.category,
+      handle: product.handle,
+    });
+
+    navigate(`/camera-test?${params.toString()}`);
+  }
+
+  const filteredProducts = products.filter((product) => {
+    if (!autoDetect) {
+      return filter === "All" || filter === "Unsupported";
+    }
+
+    return filter === "All" || product.category === filter;
+  });
+
+  const detectedCount = autoDetect
+    ? products.filter((product) => product.category !== "Unsupported").length
+    : 0;
+
+  const unsupportedCount = autoDetect
+    ? products.filter((product) => product.category === "Unsupported").length
+    : products.length;
+
+  const categories = [
+    {
+      icon: "👓",
+      name: "Glasses",
+      description: "Live face tracking and glasses overlay",
+      status: "Prototype working",
+    },
+    {
+      icon: "💄",
+      name: "Lipstick",
+      description: "Lip tracking and shade preview",
+      status: "Effect in development",
+    },
+    {
+      icon: "🎀",
+      name: "Headbands",
+      description: "Forehead tracking and accessory overlay",
+      status: "Effect in development",
+    },
+    {
+      icon: "👕",
+      name: "Clothing",
+      description: "Clothing preview and garment overlay",
+      status: "Effect in development",
+    },
+  ];
+
+  const settings = [
+    {
+      title: "Live camera",
+      description: "Allow customers to use their camera.",
+      checked: cameraEnabled,
+      change: setCameraEnabled,
+    },
+    {
+      title: "Upload photo",
+      description: "Allow customers to upload a photo.",
+      checked: uploadEnabled,
+      change: setUploadEnabled,
+    },
+    {
+      title: "Automatic product detection",
+      description: "Classify products using titles, product types and tags.",
+      checked: autoDetect,
+      change: setAutoDetect,
+    },
+  ];
 
   return (
-    <s-page heading="Shopify app template">
-      <s-button slot="primary-action" onClick={generateProduct}>
-        Generate a product
-      </s-button>
+    <s-page heading="Vibecheck Dashboard">
+      <s-section>
+        <s-box padding="large" borderRadius="large" background="subdued">
+          <s-stack direction="block" gap="base">
+            <s-heading>Virtual try-on, made for your store</s-heading>
 
-      <s-section heading="Congrats on creating a new Shopify app 🎉">
-        <s-paragraph>
-          This embedded app template uses{" "}
-          <s-link
-            href="https://shopify.dev/docs/apps/tools/app-bridge"
-            target="_blank"
-          >
-            App Bridge
-          </s-link>{" "}
-          interface examples like an{" "}
-          <s-link href="/app/additional">additional page in the app nav</s-link>
-          , as well as an{" "}
-          <s-link
-            href="https://shopify.dev/docs/api/admin-graphql"
-            target="_blank"
-          >
-            Admin GraphQL
-          </s-link>{" "}
-          mutation demo, to provide a starting point for app development.
-        </s-paragraph>
-      </s-section>
-      <s-section heading="Get started with products">
-        <s-paragraph>
-          Generate a product with GraphQL and get the JSON output for that
-          product. Learn more about the{" "}
-          <s-link
-            href="https://shopify.dev/docs/api/admin-graphql/latest/mutations/productCreate"
-            target="_blank"
-          >
-            productCreate
-          </s-link>{" "}
-          mutation in our API references. Includes a product{" "}
-          <s-link
-            href="https://shopify.dev/docs/apps/build/custom-data/metafields"
-            target="_blank"
-          >
-            metafield
-          </s-link>{" "}
-          and{" "}
-          <s-link
-            href="https://shopify.dev/docs/apps/build/custom-data/metaobjects"
-            target="_blank"
-          >
-            metaobject
-          </s-link>
-          .
-        </s-paragraph>
-        <s-stack direction="inline" gap="base">
-          <s-button
-            onClick={generateProduct}
-            {...(isLoading ? { loading: true } : {})}
-          >
-            Generate a product
-          </s-button>
-          {fetcher.data?.product && (
-            <s-button
-              onClick={() => {
-                shopify.intents.invoke?.("edit:shopify/Product", {
-                  value: fetcher.data?.product?.id,
-                });
-              }}
-              target="_blank"
-              variant="tertiary"
-            >
-              Edit product
-            </s-button>
-          )}
-        </s-stack>
-        {fetcher.data?.product && (
-          <s-section heading="productCreate mutation">
-            <s-stack direction="block" gap="base">
-              <s-box
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background="subdued"
-              >
-                <pre
-                  style={{
-                    margin: 0,
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                  }}
-                >
-                  <code>{JSON.stringify(fetcher.data.product, null, 2)}</code>
-                </pre>
-              </s-box>
+            <s-paragraph>
+              Detect products from your Shopify catalog and prepare the
+              appropriate virtual try-on experience.
+            </s-paragraph>
 
-              <s-heading>productVariantsBulkUpdate mutation</s-heading>
-              <s-box
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background="subdued"
+            <s-stack direction="inline" gap="base">
+              <s-button
+                variant="primary"
+                onClick={() => navigate("/camera-test")}
               >
-                <pre
-                  style={{
-                    margin: 0,
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                  }}
-                >
-                  <code>{JSON.stringify(fetcher.data.variant, null, 2)}</code>
-                </pre>
-              </s-box>
+                Test live glasses
+              </s-button>
 
-              <s-heading>metaobjectUpsert mutation</s-heading>
-              <s-box
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background="subdued"
-              >
-                <pre
-                  style={{
-                    margin: 0,
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                  }}
-                >
-                  <code>
-                    {JSON.stringify(fetcher.data.metaobject, null, 2)}
-                  </code>
-                </pre>
-              </s-box>
+              <s-button onClick={() => navigate("/app/additional")}>
+                More app tools
+              </s-button>
             </s-stack>
-          </s-section>
+          </s-stack>
+        </s-box>
+      </s-section>
+
+      <s-section heading="Your product catalog">
+        {error ? (
+          <s-banner tone="critical">
+            Unable to load products: {error}. Check product access
+            permissions and reauthorize the app if required.
+          </s-banner>
+        ) : (
+          <>
+            <s-grid
+              gridTemplateColumns="repeat(auto-fit, minmax(150px, 1fr))"
+              gap="base"
+            >
+              <s-grid-item>
+                <s-box padding="base" border="base" borderRadius="large">
+                  <s-heading>Total products loaded</s-heading>
+                  <s-text>{products.length}</s-text>
+                </s-box>
+              </s-grid-item>
+
+              <s-grid-item>
+                <s-box padding="base" border="base" borderRadius="large">
+                  <s-heading>Categories detected</s-heading>
+                  <s-text>{detectedCount}</s-text>
+                </s-box>
+              </s-grid-item>
+
+              <s-grid-item>
+                <s-box padding="base" border="base" borderRadius="large">
+                  <s-heading>Unsupported products</s-heading>
+                  <s-text>{unsupportedCount}</s-text>
+                </s-box>
+              </s-grid-item>
+            </s-grid>
+
+            <s-stack direction="inline" gap="base">
+              {[
+                "All",
+                "Glasses",
+                "Lipstick",
+                "Headbands",
+                "Clothing",
+                "Unsupported",
+              ].map((item) => (
+                <s-button
+                  key={item}
+                  variant={filter === item ? "primary" : "secondary"}
+                  onClick={() => setFilter(item)}
+                >
+                  {item}
+                </s-button>
+              ))}
+            </s-stack>
+
+            {!autoDetect && (
+              <s-banner tone="info">
+                Automatic detection is disabled. Products are shown as
+                unclassified until you enable detection again.
+              </s-banner>
+            )}
+
+            {products.length === 0 ? (
+              <s-banner tone="info">
+                No products were returned. Check your Shopify catalog and
+                product access permissions.
+              </s-banner>
+            ) : filteredProducts.length === 0 ? (
+              <s-banner tone="info">
+                No products match this filter.
+              </s-banner>
+            ) : (
+              <s-table>
+                <s-table-header-row>
+                  <s-table-header>Product</s-table-header>
+                  <s-table-header>Product type</s-table-header>
+                  <s-table-header>Detected category</s-table-header>
+                  <s-table-header>Try-on status</s-table-header>
+                  <s-table-header>Action</s-table-header>
+                </s-table-header-row>
+
+                <s-table-body>
+                  {filteredProducts.map((product) => (
+                    <s-table-row key={product.id}>
+                      <s-table-cell>
+                        <s-stack
+                          direction="inline"
+                          gap="base"
+                          align="center"
+                        >
+                          {product.featuredImage?.url ? (
+                            <s-thumbnail
+                              src={product.featuredImage.url}
+                              alt={
+                                product.featuredImage.altText || product.title
+                              }
+                              size="small"
+                            />
+                          ) : null}
+
+                          <s-stack direction="block" gap="small">
+                            <s-text>{product.title}</s-text>
+                            <s-text>{product.status}</s-text>
+                          </s-stack>
+                        </s-stack>
+                      </s-table-cell>
+
+                      <s-table-cell>
+                        {product.productType || "Not set"}
+                      </s-table-cell>
+
+                      <s-table-cell>
+                        {autoDetect ? product.category : "Unclassified"}
+                      </s-table-cell>
+
+                      <s-table-cell>
+                        {!autoDetect
+                          ? "Detection disabled"
+                          : product.effectReady
+                            ? "Glasses prototype"
+                            : product.category === "Unsupported"
+                              ? "Not supported"
+                              : "Effect in development"}
+                      </s-table-cell>
+
+                      <s-table-cell>
+                        <s-button
+                          variant="primary"
+                          disabled={
+                            !autoDetect ||
+                            product.category === "Unsupported"
+                          }
+                          onClick={() => openTryOn(product)}
+                        >
+                          Try on
+                        </s-button>
+                      </s-table-cell>
+                    </s-table-row>
+                  ))}
+                </s-table-body>
+              </s-table>
+            )}
+          </>
         )}
       </s-section>
 
-      <s-section slot="aside" heading="App template specs">
-        <s-paragraph>
-          <s-text>Framework: </s-text>
-          <s-link href="https://reactrouter.com/" target="_blank">
-            React Router
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>Interface: </s-text>
-          <s-link
-            href="https://shopify.dev/docs/api/app-home/using-polaris-components"
-            target="_blank"
-          >
-            Polaris web components
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>API: </s-text>
-          <s-link
-            href="https://shopify.dev/docs/api/admin-graphql"
-            target="_blank"
-          >
-            GraphQL
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>Custom data: </s-text>
-          <s-link
-            href="https://shopify.dev/docs/apps/build/custom-data"
-            target="_blank"
-          >
-            Metafields &amp; metaobjects
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>Database: </s-text>
-          <s-link href="https://www.prisma.io/" target="_blank">
-            Prisma
-          </s-link>
-        </s-paragraph>
+      <s-section heading="Try-on categories">
+        <s-grid
+          gridTemplateColumns="repeat(auto-fit, minmax(220px, 1fr))"
+          gap="base"
+        >
+          {categories.map((category) => (
+            <s-grid-item key={category.name}>
+              <s-box padding="base" border="base" borderRadius="large">
+                <s-stack direction="block" gap="small">
+                  <s-heading>
+                    {category.icon} {category.name}
+                  </s-heading>
+
+                  <s-paragraph>{category.description}</s-paragraph>
+
+                  <s-badge
+                    color={category.name === "Glasses" ? "success" : "warning"}
+                  >
+                    {category.status}
+                  </s-badge>
+                </s-stack>
+              </s-box>
+            </s-grid-item>
+          ))}
+        </s-grid>
       </s-section>
 
-      <s-section slot="aside" heading="Next steps">
+      <s-section heading="Try-on settings">
+        <s-stack direction="block" gap="base">
+          {settings.map((setting) => (
+            <s-box
+              key={setting.title}
+              padding="base"
+              border="base"
+              borderRadius="large"
+            >
+              <s-stack direction="inline" gap="base" align="center">
+                <s-stack direction="block" gap="small">
+                  <s-heading>{setting.title}</s-heading>
+                  <s-paragraph>{setting.description}</s-paragraph>
+                </s-stack>
+
+                <s-spacer />
+
+                <s-switch
+                  checked={setting.checked}
+                  onChange={(event) =>
+                    setting.change(event.currentTarget.checked)
+                  }
+                />
+              </s-stack>
+            </s-box>
+          ))}
+        </s-stack>
+
+        <s-banner tone="info">
+          These settings currently live in the dashboard session only. They
+          are not yet saved or connected to the storefront extension.
+        </s-banner>
+      </s-section>
+
+      <s-section heading="Development status">
+        <s-banner tone="success">
+          MediaPipe face tracking and the basic glasses prototype are available
+          on the camera test page.
+        </s-banner>
+
+        <s-banner tone="info">
+          Detection uses product titles, product types and tags. It does not
+          analyze product images. Lipstick, headband and clothing effects are
+          still in development.
+        </s-banner>
+      </s-section>
+
+      <s-section slot="aside" heading="Development roadmap">
         <s-unordered-list>
           <s-list-item>
-            Build an{" "}
-            <s-link
-              href="https://shopify.dev/docs/apps/getting-started/build-app-example"
-              target="_blank"
-            >
-              example app
-            </s-link>
+            Improve glasses alignment and add real product assets.
           </s-list-item>
+
           <s-list-item>
-            Explore Shopify&apos;s API with{" "}
-            <s-link
-              href="https://shopify.dev/docs/apps/tools/graphiql-admin-api"
-              target="_blank"
-            >
-              GraphiQL
-            </s-link>
+            Connect detected products to their matching try-on effects.
+          </s-list-item>
+
+          <s-list-item>
+            Develop lipstick, headband and clothing overlays.
+          </s-list-item>
+
+          <s-list-item>
+            Save dashboard settings and connect the storefront.
           </s-list-item>
         </s-unordered-list>
       </s-section>
     </s-page>
   );
 }
-
-export const headers = (headersArgs) => {
-  return boundary.headers(headersArgs);
-};
