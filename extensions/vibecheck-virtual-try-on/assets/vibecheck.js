@@ -539,7 +539,7 @@
       );
     }
 
-    openButton.addEventListener("click", openModal);
+    openButton.addEventListener("click", openProductCamera);
 
     closeButtons.forEach(function (button) {
       button.addEventListener("click", closeModal);
