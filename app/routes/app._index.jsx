@@ -1,3 +1,4 @@
+
 import { useState } from "react";
 import { useLoaderData, useNavigate } from "react-router";
 import { authenticate } from "../shopify.server";
@@ -19,6 +20,13 @@ export async function loader({ request }) {
             featuredImage {
               url
               altText
+            }
+            metafields(first: 20) {
+              nodes {
+                namespace
+                key
+                value
+              }
             }
           }
         }
@@ -51,36 +59,26 @@ export async function loader({ request }) {
         let category = "Unsupported";
         let effectReady = false;
 
-        // Lipstick and lip products
         if (
           /\b(lipsticks?|lip gloss(?:es)?|lipgloss(?:es)?|lip tints?|lip stains?|lip colors?|lip colours?)\b/.test(
             searchableText
           )
         ) {
           category = "Lipstick";
-        }
-
-        // Headbands and hair accessories
-        else if (
+        } else if (
           /\b(headbands?|hair bands?|alice bands?|head wraps?)\b/.test(
             searchableText
           )
         ) {
           category = "Headbands";
-        }
-
-        // Glasses and eyewear
-        else if (
+        } else if (
           /\b(glasses|eyeglasses|sunglasses|spectacles|eyewear|optical frames?|reading glasses)\b/.test(
             searchableText
           )
         ) {
           category = "Glasses";
           effectReady = true;
-        }
-
-        // Clothing and apparel
-        else if (
+        } else if (
           /\b(t shirts?|tshirts?|tees|shirts?|tops|blouses|dresses|hoodies|sweatshirts|jackets|coats|sweaters|jeans|trousers|pants|shorts|skirts|leggings|jumpsuits|rompers|cardigans)\b/.test(
             searchableText
           )
@@ -117,19 +115,60 @@ export default function Index() {
   const [autoDetect, setAutoDetect] = useState(true);
   const [filter, setFilter] = useState("All");
 
+  function getProductShade(product) {
+    const metafields = product.metafields?.nodes ?? [];
+
+    const preferredKeys = [
+      "custom.lipstick_shade",
+      "custom.lipstick_color",
+      "custom.lipstick_colour",
+      "custom.lip_color",
+      "custom.lip_colour",
+      "custom.shade",
+    ];
+
+    const usable = metafields.filter(
+      (field) => field?.value && String(field.value).trim()
+    );
+
+    const preferred = usable.find((field) =>
+      preferredKeys.includes(
+        `${field.namespace}.${field.key}`.toLowerCase()
+      )
+    );
+
+    if (preferred) return String(preferred.value).trim();
+
+    const fallback = usable.find((field) => {
+      const key = `${field.namespace}.${field.key}`.toLowerCase();
+
+      return (
+        /shade|lipstick_color|lipstick_colour|lip_color|lip_colour/.test(
+          key
+        )
+      );
+    });
+
+    return fallback ? String(fallback.value).trim() : "";
+  }
+
   function openTryOn(product) {
-    if (!autoDetect || product.category === "Unsupported") {
-      return;
-    }
+    if (!autoDetect || product.category === "Unsupported") return;
 
     const params = new URLSearchParams({
       id: product.id,
       title: product.title,
       category: product.category,
       handle: product.handle,
+      image: product.featuredImage?.url || "",
+      shade: getProductShade(product),
     });
 
-    navigate(`/camera-test?${params.toString()}`);
+    window.open(
+      `/camera-test?${params.toString()}`,
+      "_blank",
+      "noopener,noreferrer"
+    );
   }
 
   const filteredProducts = products.filter((product) => {
@@ -202,12 +241,10 @@ export default function Index() {
         <s-box padding="large" borderRadius="large" background="subdued">
           <s-stack direction="block" gap="base">
             <s-heading>Virtual try-on, made for your store</s-heading>
-
             <s-paragraph>
               Detect products from your Shopify catalog and prepare the
               appropriate virtual try-on experience.
             </s-paragraph>
-
             <s-stack direction="inline" gap="base">
               <s-button
                 variant="primary"
@@ -215,7 +252,6 @@ export default function Index() {
               >
                 Test live glasses
               </s-button>
-
               <s-button onClick={() => navigate("/app/additional")}>
                 More app tools
               </s-button>
@@ -227,8 +263,8 @@ export default function Index() {
       <s-section heading="Your product catalog">
         {error ? (
           <s-banner tone="critical">
-            Unable to load products: {error}. Check product access
-            permissions and reauthorize the app if required.
+            Unable to load products: {error}. Check product access permissions
+            and reauthorize the app if required.
           </s-banner>
         ) : (
           <>
@@ -242,14 +278,12 @@ export default function Index() {
                   <s-text>{products.length}</s-text>
                 </s-box>
               </s-grid-item>
-
               <s-grid-item>
                 <s-box padding="base" border="base" borderRadius="large">
                   <s-heading>Categories detected</s-heading>
                   <s-text>{detectedCount}</s-text>
                 </s-box>
               </s-grid-item>
-
               <s-grid-item>
                 <s-box padding="base" border="base" borderRadius="large">
                   <s-heading>Unsupported products</s-heading>
@@ -321,7 +355,6 @@ export default function Index() {
                               size="small"
                             />
                           ) : null}
-
                           <s-stack direction="block" gap="small">
                             <s-text>{product.title}</s-text>
                             <s-text>{product.status}</s-text>
@@ -380,9 +413,7 @@ export default function Index() {
                   <s-heading>
                     {category.icon} {category.name}
                   </s-heading>
-
                   <s-paragraph>{category.description}</s-paragraph>
-
                   <s-badge
                     color={category.name === "Glasses" ? "success" : "warning"}
                   >
@@ -409,9 +440,7 @@ export default function Index() {
                   <s-heading>{setting.title}</s-heading>
                   <s-paragraph>{setting.description}</s-paragraph>
                 </s-stack>
-
                 <s-spacer />
-
                 <s-switch
                   checked={setting.checked}
                   onChange={(event) =>
@@ -434,11 +463,9 @@ export default function Index() {
           MediaPipe face tracking and the basic glasses prototype are available
           on the camera test page.
         </s-banner>
-
         <s-banner tone="info">
-          Detection uses product titles, product types and tags. It does not
-          analyze product images. Lipstick, headband and clothing effects are
-          still in development.
+          Detection uses product titles, product types and tags. Lipstick,
+          headband and clothing effects are still in development.
         </s-banner>
       </s-section>
 
@@ -447,15 +474,12 @@ export default function Index() {
           <s-list-item>
             Improve glasses alignment and add real product assets.
           </s-list-item>
-
           <s-list-item>
             Connect detected products to their matching try-on effects.
           </s-list-item>
-
           <s-list-item>
             Develop lipstick, headband and clothing overlays.
           </s-list-item>
-
           <s-list-item>
             Save dashboard settings and connect the storefront.
           </s-list-item>

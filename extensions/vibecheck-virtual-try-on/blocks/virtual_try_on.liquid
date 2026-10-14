@@ -1,7 +1,25 @@
+
 {{ 'vibecheck.css' | asset_url | stylesheet_tag }}
 <script src="{{ 'vibecheck.js' | asset_url }}" defer="defer"></script>
 
-<div class="vibecheck-tryon" data-vibecheck>
+<div
+  class="vibecheck-tryon"
+  data-vibecheck
+  data-app-url="{{ block.settings.app_url | escape }}"
+  data-product-id="{{ product.id }}"
+  data-product-title="{{ product.title | escape }}"
+  data-product-handle="{{ product.handle | escape }}"
+  data-product-image="{% if product.featured_image %}{{ product.featured_image | image_url: width: 1200 }}{% endif %}"
+  data-product-type="{{ product.type | escape }}"
+  data-product-tags="{{ product.tags | join: ',' | escape }}"
+  data-variant-id="{{ product.selected_or_first_available_variant.id }}"
+  data-variant-title="{{ product.selected_or_first_available_variant.title | escape }}"
+  data-variant-options="{{ product.selected_or_first_available_variant.options | join: ' / ' | escape }}"
+>
+  <script type="application/json" data-vibecheck-product-json>
+    {{ product | json }}
+  </script>
+
   <button
     type="button"
     class="vibecheck-button"
@@ -10,16 +28,11 @@
     aria-expanded="false"
   >
     <span aria-hidden="true">✨</span>
-    {{ block.settings.button_text }}
+    {{ block.settings.button_text | escape }}
   </button>
 
   <div class="vibecheck-modal" data-vibecheck-modal aria-hidden="true" hidden>
-    <button
-      type="button"
-      class="vibecheck-overlay"
-      data-vibecheck-close
-      aria-label="Close virtual try-on"
-    ></button>
+    <button type="button" class="vibecheck-overlay" data-vibecheck-close aria-label="Close virtual try-on"></button>
 
     <section
       class="vibecheck-panel"
@@ -28,24 +41,37 @@
       aria-labelledby="vibecheck-title-{{ block.id }}"
       tabindex="-1"
     >
-      <button
-        type="button"
-        class="vibecheck-close"
-        data-vibecheck-close
-        aria-label="Close virtual try-on"
-      >×</button>
+      <button type="button" class="vibecheck-close" data-vibecheck-close aria-label="Close virtual try-on">×</button>
 
       <header class="vibecheck-header">
         <span class="vibecheck-badge">VIBECHECK EXPERIENCE</span>
         <h2 id="vibecheck-title-{{ block.id }}">Virtual Try-On</h2>
-        <p>Choose how you'd like to try this product.</p>
+        <p>Try the product currently selected in this store.</p>
       </header>
+
+      <div data-vibecheck-product-summary style="display:flex;align-items:center;gap:12px;margin-bottom:18px;">
+        {% if product.featured_image %}
+          <img
+            data-vibecheck-product-image
+            src="{{ product.featured_image | image_url: width: 240 }}"
+            alt="{{ product.featured_image.alt | default: product.title | escape }}"
+            width="84"
+            height="84"
+            loading="lazy"
+            style="object-fit:contain;border-radius:8px;"
+          >
+        {% endif %}
+        <div>
+          <strong data-vibecheck-product-title>{{ product.title | escape }}</strong>
+          <p data-vibecheck-variant-title style="margin:5px 0 0;">{{ product.selected_or_first_available_variant.title | escape }}</p>
+        </div>
+      </div>
 
       <div class="vibecheck-options" data-vibecheck-options>
         <button type="button" class="vibecheck-option" data-vibecheck-camera>
           <span class="vibecheck-option-icon" aria-hidden="true">📷</span>
           <strong>Live Camera</strong>
-          <small>Use your camera for a live preview</small>
+          <small>Open the product-specific camera experience</small>
           <span class="vibecheck-option-cta">Open camera →</span>
         </button>
 
@@ -62,41 +88,25 @@
       <div class="vibecheck-preview" data-vibecheck-preview hidden>
         <div class="vibecheck-preview-topline">
           <strong data-vibecheck-preview-title>Preview</strong>
-          <span class="vibecheck-live-indicator" data-vibecheck-live-indicator hidden>
-            LIVE
-          </span>
+          <span class="vibecheck-live-indicator" data-vibecheck-live-indicator hidden>LIVE</span>
         </div>
 
         <div class="vibecheck-media-frame">
-          <video
-            class="vibecheck-video"
-            data-vibecheck-video
-            autoplay
-            playsinline
-            muted
-            hidden
-          ></video>
-          <img
-            class="vibecheck-image"
-            data-vibecheck-image
-            alt="Your photo preview"
-            hidden
-          >
+          <video class="vibecheck-video" data-vibecheck-video autoplay playsinline muted hidden></video>
+          <img class="vibecheck-image" data-vibecheck-image alt="Your photo preview" hidden>
         </div>
 
         <div class="vibecheck-preview-actions">
-          <button type="button" class="vibecheck-secondary-button" data-vibecheck-back>
-            ← Choose another option
-          </button>
-          <button type="button" class="vibecheck-primary-button" data-vibecheck-capture hidden>
-            Capture photo
-          </button>
+          <button type="button" class="vibecheck-secondary-button" data-vibecheck-back>← Choose another option</button>
+          <button type="button" class="vibecheck-primary-button" data-vibecheck-capture hidden>Capture photo</button>
+          <button type="button" class="vibecheck-secondary-button" data-vibecheck-retake hidden>Retake photo</button>
+          <button type="button" class="vibecheck-primary-button" data-vibecheck-use-photo hidden>Continue with photo</button>
         </div>
       </div>
 
       <p class="vibecheck-status" data-vibecheck-status role="status" aria-live="polite"></p>
       <p class="vibecheck-privacy-note">
-        Your camera starts only after you select Live Camera. Close this window to stop it.
+        Your camera starts only after you select Live Camera. Closing this window stops it.
       </p>
     </section>
   </div>
@@ -112,6 +122,12 @@
       "id": "button_text",
       "label": "Button text",
       "default": "Virtual Try-On"
+    },
+    {
+      "type": "url",
+      "id": "app_url",
+      "label": "Vibecheck app URL",
+      "info": "For development, use your current HTTPS Shopify CLI tunnel URL. Set this to your permanent app URL after deployment."
     }
   ]
 }
