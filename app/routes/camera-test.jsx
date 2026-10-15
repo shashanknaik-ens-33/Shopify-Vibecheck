@@ -6,6 +6,8 @@ import {
 
   FaceLandmarker,
 
+  HandLandmarker,
+
   FilesetResolver,
 
 } from "@mediapipe/tasks-vision";
@@ -278,6 +280,79 @@ function cropLandmarks(landmarks, crop, video) {
 
 }
 
+
+function isHandCoveringMouth(faceLandmarks, hands) {
+  if (!faceLandmarks || !hands?.length) return false;
+
+  const lipPoints = [61, 291, 13, 14].map(
+    (index) => faceLandmarks[index]
+  );
+
+  if (lipPoints.some((point) => !point)) return false;
+
+  const xs = lipPoints.map((point) => point.x);
+  const ys = lipPoints.map((point) => point.y);
+
+  const lipWidth = Math.max(...xs) - Math.min(...xs);
+  const lipHeight = Math.max(...ys) - Math.min(...ys);
+
+  // Expand the mouth region so detection starts before
+  // the hand completely covers the lips.
+  const marginX = Math.max(lipWidth * 0.8, 0.025);
+  const marginY = Math.max(lipHeight * 2.5, 0.035);
+
+  const mouth = {
+    left: Math.min(...xs) - marginX,
+    right: Math.max(...xs) + marginX,
+    top: Math.min(...ys) - marginY,
+    bottom: Math.max(...ys) + marginY,
+  };
+
+  const mouthArea =
+    (mouth.right - mouth.left) *
+    (mouth.bottom - mouth.top);
+
+  if (mouthArea <= 0) return false;
+
+  return hands.some((hand) => {
+    if (!hand?.length) return false;
+
+    let pointsInside = 0;
+
+    for (const point of hand) {
+      if (
+        point.x >= mouth.left &&
+        point.x <= mouth.right &&
+        point.y >= mouth.top &&
+        point.y <= mouth.bottom
+      ) {
+        pointsInside++;
+      }
+    }
+
+    // Trigger as soon as a couple of detected hand landmarks
+    // enter the expanded mouth region.
+    if (pointsInside >= 2) return true;
+
+    const hx = hand.map((point) => point.x);
+    const hy = hand.map((point) => point.y);
+
+    const overlapWidth = Math.max(
+      0,
+      Math.min(mouth.right, Math.max(...hx)) -
+        Math.max(mouth.left, Math.min(...hx))
+    );
+
+    const overlapHeight = Math.max(
+      0,
+      Math.min(mouth.bottom, Math.max(...hy)) -
+        Math.max(mouth.top, Math.min(...hy))
+    );
+
+    return overlapWidth * overlapHeight / mouthArea > 0.08;
+  });
+}
+
 export default function CameraTest() {
 
   const [searchParams] = useSearchParams();
@@ -307,6 +382,8 @@ export default function CameraTest() {
           s.name.toLowerCase().includes(initialShade.toLowerCase())
 
         )?.hex || "#D71940";
+
+  const handLandmarkerRef = useRef(null);
 
   const videoRef = useRef(null);
 
@@ -375,8 +452,10 @@ export default function CameraTest() {
     }
 
     landmarkerRef.current?.close();
-
     landmarkerRef.current = null;
+
+    handLandmarkerRef.current?.close();
+    handLandmarkerRef.current = null;
 
     setCameraReady(false);
 
@@ -410,32 +489,30 @@ export default function CameraTest() {
 
       }
 
-      if (!landmarkerRef.current) {
+      if (!landmarkerRef.current || !handLandmarkerRef.current) {
+        const vision = await FilesetResolver.forVisionTasks("/mediapipe/wasm");
 
-        const vision = await FilesetResolver.forVisionTasks(
-
-          "/mediapipe/wasm"
-
-        );
-
-        landmarkerRef.current =
-
-          await FaceLandmarker.createFromOptions(vision, {
-
+        if (!landmarkerRef.current) {
+          landmarkerRef.current = await FaceLandmarker.createFromOptions(vision, {
             baseOptions: {
-
               modelAssetPath: "/mediapipe/face_landmarker.task",
-
               delegate: "GPU",
-
             },
-
             runningMode: "VIDEO",
-
             numFaces: 1,
-
           });
+        }
 
+        if (!handLandmarkerRef.current) {
+          handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
+            baseOptions: {
+              modelAssetPath: "/mediapipe/hand_landmarker.task",
+              delegate: "GPU",
+            },
+            runningMode: "VIDEO",
+            numHands: 2,
+          });
+        }
       }
 
       setStatus("Requesting front-camera permission...");
@@ -517,50 +594,92 @@ export default function CameraTest() {
             }
 
             if (video.currentTime !== lastVideoTime) {
+
               const crop = getCameraCrop(video, canvas, 1.2);
-              const result = landmarkerRef.current.detectForVideo(
-                video,
-                performance.now()
-              );
+              const timestamp = performance.now();
+              const result = landmarkerRef.current.detectForVideo(video, timestamp);
+              const handResult = handLandmarkerRef.current.detectForVideo(video, timestamp);
+              const originalFace = result.faceLandmarks?.[0];
+              const hands = handResult.landmarks ?? [];
+              const handCoversMouth = isHandCoveringMouth(originalFace, hands);
+
               lastVideoTime = video.currentTime;
 
               // Draw the cropped source and map landmarks to that same crop.
+
               ctx.clearRect(0, 0, width, height);
+
               ctx.globalCompositeOperation = "source-over";
+
               ctx.globalAlpha = 1;
+
               ctx.drawImage(
+
                 video,
+
                 crop.sx,
+
                 crop.sy,
+
                 crop.sw,
+
                 crop.sh,
+
                 0,
+
                 0,
+
                 width,
+
                 height
+
               );
 
-              const face = result.faceLandmarks?.[0];
+              const face = originalFace;
+
               if (face) {
+
                 const croppedFace = cropLandmarks(face, crop, video);
+
                 const previous = smoothedLandmarksRef.current;
+
                 const smoothing = 0.25;
+
                 const smoothed =
+
                   previous && previous.length === croppedFace.length
+
                     ? croppedFace.map((point, index) => ({
+
                         x: previous[index].x * smoothing + point.x * (1 - smoothing),
+
                         y: previous[index].y * smoothing + point.y * (1 - smoothing),
+
                         z: (previous[index].z ?? 0) * smoothing + (point.z ?? 0) * (1 - smoothing),
+
                       }))
+
                     : croppedFace.map((point) => ({ ...point }));
 
                 smoothedLandmarksRef.current = smoothed;
-                drawLipstick(ctx, smoothed, width, height, shadeRef.current);
-                setStatus("Face detected. Try your lipstick shades!");
+
+                if (!handCoversMouth) {
+                  drawLipstick(ctx, smoothed, width, height, shadeRef.current);
+                  setStatus("Face detected. Try your lipstick shades!");
+                } else {
+                  // The original camera pixels remain visible; suppress lipstick
+                  // while a detected hand overlaps the mouth region.
+                  setStatus("Hand detected near mouth. Lipstick preview paused.");
+                }
+
               } else {
+
                 smoothedLandmarksRef.current = null;
+
                 setStatus("Camera ready. Move your face into view.");
+
               }
+
             }
 
           }
@@ -630,8 +749,10 @@ export default function CameraTest() {
       streamRef.current = null;
 
       landmarkerRef.current?.close();
-
       landmarkerRef.current = null;
+
+      handLandmarkerRef.current?.close();
+      handLandmarkerRef.current = null;
 
       uploadRequestRef.current += 1;
 
