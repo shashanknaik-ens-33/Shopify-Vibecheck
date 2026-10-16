@@ -318,6 +318,91 @@
   line-height: 1.5;
 }
 
+
+/* Embedded try-on experience: sleek floating portrait popup matching beauty studio aesthetic */
+.vibecheck-panel.is-experience-mode,
+.vibecheck-panel:has(.vibecheck-experience:not([hidden])) {
+  width: min(100%, 470px) !important;
+  height: min(92vh, 780px) !important;
+  max-height: 820px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border-radius: 22px !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.4) !important;
+  background: #0c0c0e !important;
+}
+
+.vibecheck-panel.is-experience-mode .vibecheck-header,
+.vibecheck-panel.is-experience-mode [data-vibecheck-product-summary],
+.vibecheck-panel.is-experience-mode .vibecheck-options,
+.vibecheck-panel.is-experience-mode [data-vibecheck-file],
+.vibecheck-panel.is-experience-mode .vibecheck-preview,
+.vibecheck-panel.is-experience-mode .vibecheck-privacy-note,
+.vibecheck-panel.is-experience-mode .vibecheck-status,
+.vibecheck-panel:has(.vibecheck-experience:not([hidden])) .vibecheck-header,
+.vibecheck-panel:has(.vibecheck-experience:not([hidden])) [data-vibecheck-product-summary],
+.vibecheck-panel:has(.vibecheck-experience:not([hidden])) .vibecheck-options,
+.vibecheck-panel:has(.vibecheck-experience:not([hidden])) [data-vibecheck-file],
+.vibecheck-panel:has(.vibecheck-experience:not([hidden])) .vibecheck-preview,
+.vibecheck-panel:has(.vibecheck-experience:not([hidden])) .vibecheck-privacy-note,
+.vibecheck-panel:has(.vibecheck-experience:not([hidden])) .vibecheck-status {
+  display: none !important;
+}
+
+.vibecheck-panel.is-experience-mode .vibecheck-close,
+.vibecheck-panel:has(.vibecheck-experience:not([hidden])) .vibecheck-close {
+  display: grid !important;
+  z-index: 100 !important;
+  top: 10px !important;
+  right: 10px !important;
+  width: 34px !important;
+  height: 34px !important;
+  min-width: 34px !important;
+  font-size: 20px !important;
+  background: rgba(0, 0, 0, 0.65) !important;
+  color: #fff !important;
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  border-radius: 50% !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  transition: background .18s ease, transform .18s ease;
+}
+
+.vibecheck-panel.is-experience-mode .vibecheck-close:hover,
+.vibecheck-panel:has(.vibecheck-experience:not([hidden])) .vibecheck-close:hover {
+  background: rgba(0, 0, 0, 0.9) !important;
+  transform: scale(1.06);
+}
+
+.vibecheck-experience {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 100% !important;
+  background: #0c0c0e !important;
+}
+
+.vibecheck-experience-frame {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  border: 0 !important;
+  background: #0c0c0e !important;
+}
+
+@media (max-width: 600px) {
+  .vibecheck-panel:has(.vibecheck-experience:not([hidden])) {
+    width: 100%;
+    height: 94dvh;
+    max-height: 94dvh;
+    border-radius: 18px;
+  }
+  .vibecheck-experience {
+    height: 100%;
+    min-height: 360px;
+  }
+}
+
 /* Mobile layout */
 @media (max-width: 600px) {
   .vibecheck-modal {

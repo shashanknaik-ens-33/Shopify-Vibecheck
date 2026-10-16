@@ -9,6 +9,8 @@
     const openButton = root.querySelector("[data-vibecheck-open]");
     const closeButtons = root.querySelectorAll("[data-vibecheck-close]");
     const options = root.querySelector("[data-vibecheck-options]");
+    const experience = root.querySelector("[data-vibecheck-experience]");
+    const experienceFrame = root.querySelector("[data-vibecheck-experience-frame]");
     const cameraButton = root.querySelector("[data-vibecheck-camera]");
     const uploadButton = root.querySelector("[data-vibecheck-upload]");
     const fileInput = root.querySelector("[data-vibecheck-file]");
@@ -25,6 +27,9 @@
     const panel = root.querySelector(".vibecheck-panel");
     const productJsonElement = root.querySelector(
       "[data-vibecheck-product-json]"
+    );
+    const catalogJsonElement = root.querySelector(
+      "[data-vibecheck-catalog-json]"
     );
 
     if (
@@ -47,6 +52,7 @@
     root.dataset.vibecheckInitialized = "true";
 
     let shopifyProduct = null;
+    let shopifyCatalog = [];
     let cameraStream = null;
     let currentObjectUrl = null;
     let previousBodyOverflow = "";
@@ -60,6 +66,54 @@
     } catch (error) {
       console.error("Vibecheck: could not read Shopify product data.", error);
     }
+
+    try {
+      shopifyCatalog = catalogJsonElement
+        ? JSON.parse(catalogJsonElement.textContent)
+        : [];
+      if (!Array.isArray(shopifyCatalog)) shopifyCatalog = [];
+    } catch (error) {
+      shopifyCatalog = [];
+    }
+
+    // Automatically discover any other lipstick products the merchant has added
+    async function discoverStoreLipsticks() {
+      try {
+        const response = await fetch("/products.json?limit=50");
+        if (!response.ok) return;
+        const data = await response.json();
+        const existingIds = new Set(shopifyCatalog.map(function (p) { return String(p.id); }));
+        (data.products || []).forEach(function (item) {
+          if (existingIds.has(String(item.id))) return;
+          const text = [item.title, item.product_type, (item.tags || []).join(" ")].join(" ").toLowerCase();
+          if (/\b(lip|lipstick|lipgloss|lip gloss|lip tint|lip stain|lip oil)\b/.test(text)) {
+            shopifyCatalog.push({
+              id: item.id,
+              title: item.title,
+              handle: item.handle,
+              type: item.product_type,
+              image: item.images && item.images[0] ? item.images[0].src : "",
+              price: item.variants && item.variants[0] ? "$" + item.variants[0].price : "",
+              variants: (item.variants || []).map(function (v) {
+                return {
+                  id: v.id,
+                  title: v.title,
+                  options: [v.option1, v.option2, v.option3].filter(Boolean),
+                  available: v.available !== false,
+                  image: v.featured_image && v.featured_image.src ? v.featured_image.src : (item.images && item.images[0] ? item.images[0].src : ""),
+                  swatch: ""
+                };
+              })
+            });
+            existingIds.add(String(item.id));
+          }
+        });
+        sendDataToFrame();
+      } catch (e) {
+        // Silently continue if fetch is unavailable
+      }
+    }
+    discoverStoreLipsticks();
 
     function setStatus(message) {
       status.textContent = message || "";
@@ -269,6 +323,7 @@
 
       window.requestAnimationFrame(function () {
         if (panel) panel.focus();
+        openProductCamera();
       });
     }
 
@@ -279,6 +334,8 @@
 
       photoSource = null;
       modal.classList.remove("is-open");
+      modal.classList.remove("is-experience-mode");
+      if (panel) panel.classList.remove("is-experience-mode");
       modal.setAttribute("aria-hidden", "true");
       modal.hidden = true;
 
@@ -286,6 +343,8 @@
       document.body.style.overflow = previousBodyOverflow;
 
       showOptions();
+      if (experience) experience.hidden = true;
+      if (experienceFrame) experienceFrame.src = "about:blank";
 
       if (previousFocus && typeof previousFocus.focus === "function") {
         previousFocus.focus();
@@ -295,50 +354,97 @@
     }
 
     function openProductCamera() {
-      const appUrl = (root.dataset.appUrl || "").trim();
+      let appUrl = (root.dataset.appUrl || "").trim();
 
       if (!appUrl) {
-        setStatus(
-          "The Vibecheck app URL is missing. Set it in the theme editor."
-        );
-        return;
+        // Fallback: If not explicitly set in theme editor, use current host
+        appUrl = window.location.origin;
       }
 
       let destination;
-
       try {
-        destination = new URL(appUrl);
+        destination = new URL(appUrl, window.location.origin);
       } catch (error) {
         setStatus("The Vibecheck app URL is invalid.");
         return;
       }
 
-      if (destination.protocol !== "https:") {
-        setStatus("The Vibecheck app URL must use HTTPS.");
-        return;
-      }
-
       const product = getProductContext();
-
       if (!product.id) {
-        setStatus(
-          "Could not identify this Shopify product. Refresh and try again."
-        );
+        setStatus("Could not identify this Shopify product. Refresh and try again.");
         return;
       }
 
       destination.pathname = "/camera-test";
       destination.search = "";
-
       Object.entries(product).forEach(function ([key, value]) {
         if (value !== null && value !== undefined && value !== "") {
           destination.searchParams.set(key, String(value));
         }
       });
+      destination.searchParams.set("embed", "1");
+      // Pass only real Shopify variant metadata; never send a demo shade catalogue.
+      const variants = (shopifyProduct?.variants || []).map(function (variant) {
+        const variantImage = variant?.featured_image?.src || variant?.featured_image?.url || "";
+        return {
+          id: variant.id,
+          title: variant.title || "Default",
+          options: Array.isArray(variant.options) ? variant.options : [],
+          available: variant.available !== false,
+          image: variantImage
+        };
+      });
+      if (variants.length) destination.searchParams.set("variants", JSON.stringify(variants));
 
-      // Navigate in the current tab instead of opening a new tab.
-      setStatus("Opening the try-on experience for " + product.title + ".");
-      window.location.href = destination.toString();
+      if (!experience || !experienceFrame) {
+        setStatus("The embedded try-on view is unavailable. Please refresh and try again.");
+        return;
+      }
+
+      stopCamera();
+      clearObjectUrl();
+      options.hidden = true;
+      preview.hidden = true;
+      experience.hidden = false;
+      modal.classList.add("is-experience-mode");
+      if (panel) panel.classList.add("is-experience-mode");
+      if (experienceFrame) {
+        experienceFrame.setAttribute("allow", "camera *; microphone *; fullscreen *; display-capture *");
+      }
+
+      function onFrameLoaded() {
+        sendDataToFrame();
+      }
+
+      experienceFrame.removeEventListener("load", onFrameLoaded);
+      experienceFrame.addEventListener("load", onFrameLoaded, { once: true });
+
+      if (experienceFrame.src !== destination.toString()) {
+        experienceFrame.src = destination.toString();
+      } else {
+        sendDataToFrame();
+      }
+      setStatus("Loading live try-on for " + product.title + "…");
+    }
+
+    function sendDataToFrame() {
+      if (!experienceFrame || !experienceFrame.contentWindow) return;
+      try {
+        const product = getProductContext();
+        experienceFrame.contentWindow.postMessage(
+          {
+            type: "VIBECHECK_DATA",
+            product: {
+              ...product,
+              variants: shopifyProduct?.variants || []
+            },
+            catalog: shopifyCatalog
+          },
+          "*"
+        );
+      } catch (err) {
+        // Frame may still be navigating
+      }
     }
 
     async function startCamera() {
@@ -539,7 +645,7 @@
       );
     }
 
-    openButton.addEventListener("click", openProductCamera);
+    openButton.addEventListener("click", openModal);
 
     closeButtons.forEach(function (button) {
       button.addEventListener("click", closeModal);
@@ -578,6 +684,40 @@
       if (event.target === modal) closeModal();
     });
 
+    // Listen for iframe communication: ready handshake, variant selection, and close commands
+    window.addEventListener("message", function (event) {
+      if (!event.data || typeof event.data !== "object") return;
+      if (event.data.type === "VIBECHECK_READY") {
+        sendDataToFrame();
+      } else if (event.data.type === "VIBECHECK_SELECT_VARIANT") {
+        const variantId = event.data.variantId;
+        const variantInput = document.querySelector(
+          'form[action*="/cart/add"] [name="id"]'
+        );
+        if (variantInput && variantId) {
+          variantInput.value = variantId;
+        }
+        const variantRadios = document.querySelectorAll(
+          'input[type="radio"][value="' + variantId + '"]'
+        );
+        if (variantRadios.length) {
+          variantRadios[0].checked = true;
+        }
+        const variantSelects = document.querySelectorAll(
+          'select[name="id"]'
+        );
+        if (variantSelects.length && variantId) {
+          variantSelects[0].value = variantId;
+        }
+      } else if (event.data.type === "VIBECHECK_NAVIGATE_PRODUCT") {
+        if (event.data.handle) {
+          window.location.href = "/products/" + encodeURIComponent(event.data.handle);
+        }
+      } else if (event.data.type === "VIBECHECK_CLOSE") {
+        closeModal();
+      }
+    });
+
     document.addEventListener("keydown", function (event) {
       if (event.key === "Escape" && !modal.hidden) {
         closeModal();
@@ -604,4 +744,16 @@
   document.addEventListener("shopify:section:load", function (event) {
     initializeAll(event.target);
   });
+
+  // Guard: Ensure the Virtual Try-On button is never hidden or removed by theme updates
+  if (typeof window !== "undefined" && window.MutationObserver && document.body) {
+    var domObserver = new MutationObserver(function () {
+      var buttons = document.querySelectorAll("[data-vibecheck-open]");
+      buttons.forEach(function (btn) {
+        if (btn.style.display === "none") btn.style.display = "inline-flex";
+        if (btn.style.visibility === "hidden") btn.style.visibility = "visible";
+      });
+    });
+    domObserver.observe(document.body, { childList: true, subtree: true });
+  }
 })();
