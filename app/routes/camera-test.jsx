@@ -145,9 +145,9 @@ class MultiLandmarkSmoother {
         // minCutoff = 0.85 Hz: stops static sub-pixel sensor jitter completely
         // beta = 0.015: responsive tracking when head turns or mouth moves
         f = {
-          x: new OneEuroFilter(1.2, 0.04, 1.0),
-          y: new OneEuroFilter(1.2, 0.04, 1.0),
-          z: new OneEuroFilter(1.2, 0.04, 1.0),
+          x: new OneEuroFilter(2.0, 0.08, 1.0),
+          y: new OneEuroFilter(2.0, 0.08, 1.0),
+          z: new OneEuroFilter(2.0, 0.08, 1.0),
         };
         this.filters.set(index, f);
       }
@@ -1073,7 +1073,7 @@ const initVisionTasks = useCallback(async () => {
           }
 
           // Throttle inference slightly to leave GPU/CPU bandwidth for 60fps rendering
-          if (now - lastInferenceTime < 24) return;
+          if (now - lastInferenceTime < 20) return;
           lastInferenceTime = now;
 
           isInferringRef.current = true;
