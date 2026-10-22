@@ -508,40 +508,43 @@ function cropLandmarks(landmarks, crop, video) {
 }
 
 
+
 function isHandCoveringMouth(faceLandmarks, hands) {
   if (!faceLandmarks || !hands?.length) return false;
 
-  const indices = [61, 291, 13, 14];
-  const lips = indices.map((i) => faceLandmarks[i]);
+  // Use the actual lip corners and inner lip landmarks.
+  const lipPoints = [61, 291, 13, 14]
+    .map((index) => faceLandmarks[index])
+    .filter(Boolean);
 
-  if (lips.some((point) => !point)) return false;
+  if (lipPoints.length !== 4) return false;
 
-  const xs = lips.map((p) => p.x);
-  const ys = lips.map((p) => p.y);
+  const xs = lipPoints.map((p) => p.x);
+  const ys = lipPoints.map((p) => p.y);
 
   const lipWidth = Math.max(...xs) - Math.min(...xs);
   const lipHeight = Math.max(...ys) - Math.min(...ys);
 
-  const left = Math.min(...xs) - Math.max(lipWidth * 0.8, 0.025);
-  const right = Math.max(...xs) + Math.max(lipWidth * 0.8, 0.025);
-  const top = Math.min(...ys) - Math.max(lipHeight * 2.5, 0.035);
-  const bottom = Math.max(...ys) + Math.max(lipHeight * 2.5, 0.035);
+  // Expand the mouth region to account for hands covering the lips
+  // before all fingertips or palm landmarks reach the lip boundary.
+  const padX = Math.max(lipWidth * 0.8, 0.025);
+  const padY = Math.max(lipHeight * 2.5, 0.035);
 
-  const mouthWidth = right - left;
-  const mouthHeight = bottom - top;
-
-  if (mouthWidth <= 0 || mouthHeight <= 0) return false;
+  const left = Math.min(...xs) - padX;
+  const right = Math.max(...xs) + padX;
+  const top = Math.min(...ys) - padY;
+  const bottom = Math.max(...ys) + padY;
 
   return hands.some((hand) => {
-    if (!hand?.length) return false;
+    if (!hand || hand.length < 10) return false;
 
-    const hx = hand.map((p) => p.x);
-    const hy = hand.map((p) => p.y);
+    const xs = hand.map((p) => p.x);
+    const ys = hand.map((p) => p.y);
 
-    const handLeft = Math.min(...hx);
-    const handRight = Math.max(...hx);
-    const handTop = Math.min(...hy);
-    const handBottom = Math.max(...hy);
+    const handLeft = Math.min(...xs);
+    const handRight = Math.max(...xs);
+    const handTop = Math.min(...ys);
+    const handBottom = Math.max(...ys);
 
     const overlapWidth = Math.max(
       0,
@@ -553,29 +556,14 @@ function isHandCoveringMouth(faceLandmarks, hands) {
       Math.min(bottom, handBottom) - Math.max(top, handTop)
     );
 
-    if (
-      overlapWidth / mouthWidth > 0.35 &&
-      overlapHeight / mouthHeight > 0.3
-    ) {
-      return true;
-    }
-
-    let inside = 0;
-
-    for (const point of hand) {
-      if (
-        point.x >= left &&
-        point.x <= right &&
-        point.y >= top &&
-        point.y <= bottom
-      ) {
-        inside++;
-      }
-    }
-
-    return inside >= 2;
+    // Require meaningful overlap in both dimensions.
+    return (
+      overlapWidth / Math.max(right - left, 0.001) >= 0.25 &&
+      overlapHeight / Math.max(bottom - top, 0.001) >= 0.2
+    );
   });
 }
+
 
 
 // ============================================================================
@@ -663,6 +651,10 @@ export default function CameraTest() {
   const activeLandmarksRef = useRef(null);
   const mouthOccludedRef = useRef(true);
   const isInferringRef = useRef(false);
+  const lastFaceTimestampRef = useRef(-1);
+const lastHandTimestampRef = useRef(-1);
+const lastConfirmedOcclusionRef = useRef(0);
+const clearMouthFramesRef = useRef(0);
   const streamRef = useRef(null);
   const animationRef = useRef(null);
   const runningRef = useRef(false);
@@ -1073,32 +1065,87 @@ const initVisionTasks = useCallback(async () => {
           }
 
           // Throttle inference slightly to leave GPU/CPU bandwidth for 60fps rendering
-          if (now - lastInferenceTime < 20) return;
+          if (now - lastInferenceTime < 50) return;
           lastInferenceTime = now;
 
           isInferringRef.current = true;
           try {
-            const result = landmarkerRef.current.detectForVideo(video, now);
+            
+const faceTimestamp = Math.max(
+  Math.floor(now),
+  lastFaceTimestampRef.current + 1
+);
+
+lastFaceTimestampRef.current = faceTimestamp;
+
+const result = landmarkerRef.current.detectForVideo(
+  video,
+  faceTimestamp
+);
+
 const face = result?.faceLandmarks?.[0];
 
 
-if (!handLandmarkerRef.current) {
-  // Keep lipstick working while the optional hand detector loads.
-  mouthOccludedRef.current = false;
-} else {
-  try {
-    const handResult =
-      handLandmarkerRef.current.detectForVideo(video, now);
 
-    mouthOccludedRef.current = isHandCoveringMouth(
+
+if (!handLandmarkerRef.current) {
+  // Hand detector is still loading; don't interrupt face tracking.
+  mouthOccludedRef.current = false;
+} else if (!face) {
+  // No reliable face landmarks: hide the lipstick.
+  mouthOccludedRef.current = true;
+} else {
+    const handTimestamp = Math.max(
+      Math.floor(now),
+      lastHandTimestampRef.current + 1
+    );
+
+    lastHandTimestampRef.current = handTimestamp;
+
+    const handResult = handLandmarkerRef.current.detectForVideo(
+      video,
+      handTimestamp
+    );
+
+    const isCovered = isHandCoveringMouth(
       face,
       handResult?.landmarks ?? []
     );
-  } catch (handError) {
-    // A temporary hand-detection error must not hide all lipstick.
+
+    console.log(
+  "[Vibecheck] Hand count:",
+  handResult?.landmarks?.length ?? 0,
+  "| Occluded:",
+  isCovered
+);
+
+   
+const handsDetected = handResult?.landmarks?.length ?? 0;
+
+if (isCovered && handsDetected > 0) {
+  // Hand overlaps mouth: hide lipstick immediately.
+  lastConfirmedOcclusionRef.current = performance.now();
+  mouthOccludedRef.current = true;
+  clearMouthFramesRef.current = 0;
+} else if (mouthOccludedRef.current) {
+  // Wait briefly after the last confirmed occlusion.
+  const timeSinceOcclusion =
+    performance.now() - lastConfirmedOcclusionRef.current;
+
+  clearMouthFramesRef.current += 1;
+
+  if (
+    timeSinceOcclusion > 180 &&
+    clearMouthFramesRef.current >= 3
+  ) {
     mouthOccludedRef.current = false;
+    clearMouthFramesRef.current = 0;
   }
+} else {
+  // Mouth already clear: maintain visible lipstick.
+  clearMouthFramesRef.current = 0;
 }
+
 
 
             if (face) {
@@ -1114,6 +1161,7 @@ if (!handLandmarkerRef.current) {
               activeLandmarksRef.current = null;
               setIsFaceDetected(false);
             }
+          }
           } catch (e) {
             // Keep frame loop going even if detection skips a cycle
           } finally {
@@ -1175,6 +1223,13 @@ if (!handLandmarkerRef.current) {
 
               // 3. Render lipstick overlay using current 1€ filtered landmarks
               const smoothed = activeLandmarksRef.current;
+
+              console.log(
+  "[Vibecheck] Face landmarks:",
+  activeLandmarksRef.current?.length ?? 0,
+  "| Occluded:",
+  mouthOccludedRef.current
+);
 
 if (smoothed && !mouthOccludedRef.current) {
                 const isSplit = splitModeRef.current;
