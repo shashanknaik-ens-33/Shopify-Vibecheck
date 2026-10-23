@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import {
-  FaceLandmarker,
-  HandLandmarker,
-  FilesetResolver,
-} from "@mediapipe/tasks-vision";
+  getTryOnFaceDetector,
+  getTryOnHandDetector,
+  detectTryOnFace,
+  detectTryOnHands,
+} from "../utils/tryon-face-detector";
 
 // ============================================================================
 // CURATED LUXURY BEAUTY SHADES & FALLBACKS
@@ -145,9 +146,9 @@ class MultiLandmarkSmoother {
         // minCutoff = 0.85 Hz: stops static sub-pixel sensor jitter completely
         // beta = 0.015: responsive tracking when head turns or mouth moves
         f = {
-          x: new OneEuroFilter(2.0, 0.08, 1.0),
-          y: new OneEuroFilter(2.0, 0.08, 1.0),
-          z: new OneEuroFilter(2.0, 0.08, 1.0),
+          x: new OneEuroFilter(1.2, 0.025, 1.0),
+          y: new OneEuroFilter(1.2, 0.025, 1.0),
+          z: new OneEuroFilter(1.2, 0.025, 1.0),
         };
         this.filters.set(index, f);
       }
@@ -359,8 +360,11 @@ function drawLipstickEnhanced(
   ctx.fillRect(0, 0, width, height);
 
   // --- LAYER 3: Finish-Specific Highlights & Texture ---
-  const lowerCenterX = (pBottomOuter.x * width + pBottomInner.x * width) / 2;
-  const lowerCenterY = (pBottomOuter.y * width + pBottomInner.y * height) / 2;
+  const lowerCenterX =
+  ((pBottomOuter.x + pBottomInner.x) / 2) * width;
+
+const lowerCenterY =
+  ((pBottomOuter.y + pBottomInner.y) / 2) * height;
   const lipWidthPx = Math.abs((pRightCorner?.x || 1) - (pLeftCorner?.x || 0)) * width;
 
   if (finish === "glossy") {
@@ -649,9 +653,10 @@ export default function CameraTest() {
   const imageLandmarkerRef = useRef(null);
   const smootherRef = useRef(new MultiLandmarkSmoother());
   const activeLandmarksRef = useRef(null);
-  const mouthOccludedRef = useRef(true);
+  const mouthOccludedRef = useRef(false);
   const isInferringRef = useRef(false);
   const lastFaceTimestampRef = useRef(-1);
+  const lastValidFaceRef = useRef(null);
 const lastHandTimestampRef = useRef(-1);
 const lastConfirmedOcclusionRef = useRef(0);
 const clearMouthFramesRef = useRef(0);
@@ -866,9 +871,7 @@ const clearMouthFramesRef = useRef(0);
       videoRef.current.srcObject = null;
     }
 
-    landmarkerRef.current?.close();
     landmarkerRef.current = null;
-    handLandmarkerRef.current?.close();
     handLandmarkerRef.current = null;
     smootherRef.current.reset();
     activeLandmarksRef.current = null;
@@ -879,93 +882,28 @@ const clearMouthFramesRef = useRef(0);
 
   // Initialize MediaPipe vision tasks in background with GPU delegate
   
+
 const initVisionTasks = useCallback(async () => {
   try {
-    // Initialize MediaPipe resources once for both detectors.
-    const vision = await FilesetResolver.forVisionTasks("/mediapipe/wasm");
-
-    // 1. Initialize face tracking.
     if (!landmarkerRef.current) {
-      try {
-        landmarkerRef.current = await FaceLandmarker.createFromOptions(
-          vision,
-          {
-            baseOptions: {
-              modelAssetPath: "/mediapipe/face_landmarker.task",
-              delegate: "GPU",
-            },
-            runningMode: "VIDEO",
-            numFaces: 1,
-            minFaceDetectionConfidence: 0.5,
-            minFacePresenceConfidence: 0.5,
-            minTrackingConfidence: 0.5,
-          }
-        );
-      } catch (gpuError) {
-        console.warn(
-          "GPU delegate unavailable, using CPU for FaceLandmarker",
-          gpuError
-        );
-
-        landmarkerRef.current = await FaceLandmarker.createFromOptions(
-          vision,
-          {
-            baseOptions: {
-              modelAssetPath: "/mediapipe/face_landmarker.task",
-              delegate: "CPU",
-            },
-            runningMode: "VIDEO",
-            numFaces: 1,
-          }
-        );
-      }
+      landmarkerRef.current = await getTryOnFaceDetector();
     }
 
-    // 2. Initialize hand tracking for mouth-occlusion detection.
     if (!handLandmarkerRef.current) {
       try {
-        handLandmarkerRef.current = await HandLandmarker.createFromOptions(
-          vision,
-          {
-            baseOptions: {
-              modelAssetPath: "/mediapipe/hand_landmarker.task",
-              delegate: "GPU",
-            },
-            runningMode: "VIDEO",
-            numHands: 2,
-            minHandDetectionConfidence: 0.45,
-            minHandPresenceConfidence: 0.45,
-            minTrackingConfidence: 0.45,
-          }
-        );
-      } catch (gpuError) {
+        handLandmarkerRef.current = await getTryOnHandDetector();
+      } catch (handError) {
         console.warn(
-          "GPU delegate unavailable, using CPU for HandLandmarker",
-          gpuError
+          "Hand detector unavailable; occlusion detection is disabled.",
+          handError
         );
-
-        try {
-          handLandmarkerRef.current = await HandLandmarker.createFromOptions(
-            vision,
-            {
-              baseOptions: {
-                modelAssetPath: "/mediapipe/hand_landmarker.task",
-                delegate: "CPU",
-              },
-              runningMode: "VIDEO",
-              numHands: 2,
-              minHandDetectionConfidence: 0.45,
-              minHandPresenceConfidence: 0.45,
-              minTrackingConfidence: 0.45,
-            }
-          );
-        } catch (cpuError) {
-          console.error("HandLandmarker failed to initialize:", cpuError);
-        }
       }
     }
-  } catch (err) {
-    console.warn("Vision tasks background loading error:", err);
+
+    setStatus("Ready! Smooth tracking active.");
+  } catch (error) {
+    console.error("TensorFlow.js detector initialization failed:", error);
+    setStatus("Could not initialize face tracking. Please refresh and try again.");
   }
 }, []);
 
@@ -1054,120 +992,109 @@ const initVisionTasks = useCallback(async () => {
         // --------------------------------------------------------------------
         let lastInferenceTime = 0;
 
-        const runInferenceStep = (now) => {
-          if (
-            isInferringRef.current ||
-            !landmarkerRef.current ||
-            !video ||
-            video.readyState < 2
-          ) {
-            return;
-          }
+        
+const runInferenceStep = async (now) => {
+  if (
+    isInferringRef.current ||
+    !landmarkerRef.current ||
+    !video ||
+    video.readyState < 2
+  ) {
+    return;
+  }
 
-          // Throttle inference slightly to leave GPU/CPU bandwidth for 60fps rendering
-          if (now - lastInferenceTime < 50) return;
-          lastInferenceTime = now;
+  if (now - lastInferenceTime < 50) return;
+  lastInferenceTime = now;
+  isInferringRef.current = true;
 
-          isInferringRef.current = true;
-          try {
-            
-const faceTimestamp = Math.max(
-  Math.floor(now),
-  lastFaceTimestampRef.current + 1
-);
-
-lastFaceTimestampRef.current = faceTimestamp;
-
-const result = landmarkerRef.current.detectForVideo(
-  video,
-  faceTimestamp
-);
-
-const face = result?.faceLandmarks?.[0];
-
-
-
-
-if (!handLandmarkerRef.current) {
-  // Hand detector is still loading; don't interrupt face tracking.
-  mouthOccludedRef.current = false;
-} else if (!face) {
-  // No reliable face landmarks: hide the lipstick.
-  mouthOccludedRef.current = true;
-} else {
-    const handTimestamp = Math.max(
-      Math.floor(now),
-      lastHandTimestampRef.current + 1
+  try {
+    const face = await detectTryOnFace(
+      landmarkerRef.current,
+      video
     );
 
-    lastHandTimestampRef.current = handTimestamp;
+    console.log("[Vibecheck] Face detection:", {
+  detected: !!face,
+  landmarkCount: face?.length ?? 0,
+  mouthOccluded: mouthOccludedRef.current,
+});
 
-    const handResult = handLandmarkerRef.current.detectForVideo(
-      video,
-      handTimestamp
-    );
+    if (!runningRef.current) return;
 
-    const isCovered = isHandCoveringMouth(
-      face,
-      handResult?.landmarks ?? []
-    );
-
-    console.log(
-  "[Vibecheck] Hand count:",
-  handResult?.landmarks?.length ?? 0,
-  "| Occluded:",
-  isCovered
-);
-
-   
-const handsDetected = handResult?.landmarks?.length ?? 0;
-
-if (isCovered && handsDetected > 0) {
-  // Hand overlaps mouth: hide lipstick immediately.
-  lastConfirmedOcclusionRef.current = performance.now();
-  mouthOccludedRef.current = true;
-  clearMouthFramesRef.current = 0;
-} else if (mouthOccludedRef.current) {
-  // Wait briefly after the last confirmed occlusion.
-  const timeSinceOcclusion =
-    performance.now() - lastConfirmedOcclusionRef.current;
-
-  clearMouthFramesRef.current += 1;
+    if (!face) {
+  // Preserve the last valid face briefly to prevent flicker.
+  const elapsed =
+    performance.now() - lastFaceTimestampRef.current;
 
   if (
-    timeSinceOcclusion > 180 &&
-    clearMouthFramesRef.current >= 3
+    !mouthOccludedRef.current &&
+    lastValidFaceRef.current &&
+    elapsed < 180
   ) {
-    mouthOccludedRef.current = false;
-    clearMouthFramesRef.current = 0;
+    activeLandmarksRef.current = lastValidFaceRef.current;
+  } else {
+    activeLandmarksRef.current = null;
   }
-} else {
-  // Mouth already clear: maintain visible lipstick.
+
+  setIsFaceDetected(false);
+  return;
+}
+
+    const crop = getCameraCrop(video, canvas, zoomRef.current);
+    const cropped = cropLandmarks(face, crop, video);
+
+    if (handLandmarkerRef.current) {
+      const hands = await detectTryOnHands(
+        handLandmarkerRef.current,
+        video
+      );
+
+      if (!runningRef.current) return;
+
+      const croppedHands = hands.map((hand) =>
+  hand.map((point) => ({
+    ...point,
+    x: (point.x * video.videoWidth - crop.sx) / crop.sw,
+    y: (point.y * video.videoHeight - crop.sy) / crop.sh,
+  }))
+);
+
+const isCovered = isHandCoveringMouth(cropped, croppedHands);
+
+      if (isCovered) {
+        lastConfirmedOcclusionRef.current = performance.now();
+        mouthOccludedRef.current = true;
+        clearMouthFramesRef.current = 0;
+      } else if (mouthOccludedRef.current) {
+        clearMouthFramesRef.current += 1;
+
+        if (
+          performance.now() - lastConfirmedOcclusionRef.current > 180 &&
+          clearMouthFramesRef.current >= 3
+        ) {
+          mouthOccludedRef.current = false;
+          clearMouthFramesRef.current = 0;
+        }
+      }
+    } else {
+  // Keep lipstick visible when face tracking works
+  // but the optional hand detector is unavailable.
+  mouthOccludedRef.current = false;
   clearMouthFramesRef.current = 0;
 }
 
+    const smoothed = smootherRef.current.filter(cropped, now);
+    lastFaceTimestampRef.current = performance.now();
+    lastValidFaceRef.current = smoothed;
+    activeLandmarksRef.current = smoothed;
+    setIsFaceDetected(true);
+  } catch (error) {
+    console.warn("Try-on inference skipped:", error);
+  } finally {
+    isInferringRef.current = false;
+  }
+};
 
-
-            if (face) {
-              const currentZoom = zoomRef.current;
-              const crop = getCameraCrop(video, canvas, currentZoom);
-              const cropped = cropLandmarks(face, crop, video);
-
-              // Update 1€ Filter with precise timestamp
-              const smoothed = smootherRef.current.filter(cropped, now);
-              activeLandmarksRef.current = smoothed;
-              setIsFaceDetected(true);
-            } else {
-              activeLandmarksRef.current = null;
-              setIsFaceDetected(false);
-            }
-          }
-          } catch (e) {
-            // Keep frame loop going even if detection skips a cycle
-          } finally {
-            isInferringRef.current = false;
-          }
-        };
 
         // --------------------------------------------------------------------
         // PRIMARY RENDER LOOP (Native 60 FPS RequestAnimationFrame)
@@ -1223,15 +1150,7 @@ if (isCovered && handsDetected > 0) {
 
               // 3. Render lipstick overlay using current 1€ filtered landmarks
               const smoothed = activeLandmarksRef.current;
-
-              console.log(
-  "[Vibecheck] Face landmarks:",
-  activeLandmarksRef.current?.length ?? 0,
-  "| Occluded:",
-  mouthOccludedRef.current
-);
-
-if (smoothed && !mouthOccludedRef.current) {
+                if (smoothed && !mouthOccludedRef.current) {
                 const isSplit = splitModeRef.current;
                 const ratio = splitRatioRef.current;
                 const currentColor = shadeRef.current;
@@ -1343,78 +1262,81 @@ if (smoothed && !mouthOccludedRef.current) {
       }
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
-      landmarkerRef.current?.close();
       landmarkerRef.current = null;
       smootherRef.current.reset();
       activeLandmarksRef.current = null;
       uploadRequestRef.current += 1;
-      imageLandmarkerRef.current?.close();
       imageLandmarkerRef.current = null;
     };
   }, [startCamera]);
 
   // PHOTO UPLOAD PROCESSING
-  const renderUploadedPhoto = useCallback(async (image) => {
-    const requestId = ++uploadRequestRef.current;
-    try {
-      if (!image.complete || !image.naturalWidth || !image.naturalHeight) return;
-      setStatus("Detecting lips in photo...");
+  
+const renderUploadedPhoto = useCallback(async (image) => {
+  const requestId = ++uploadRequestRef.current;
 
-      if (!imageLandmarkerRef.current) {
-        const vision = await FilesetResolver.forVisionTasks("/mediapipe/wasm");
-        imageLandmarkerRef.current = await FaceLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath: "/mediapipe/face_landmarker.task",
-            delegate: "GPU",
-          },
-          runningMode: "IMAGE",
-          numFaces: 1,
-        });
-      }
-
-      const result = imageLandmarkerRef.current.detect(image);
-      if (requestId !== uploadRequestRef.current) return;
-
-      const canvas = uploadCanvasRef.current;
-      if (!canvas) return;
-
-      const scale = Math.min(1, 1400 / Math.max(image.naturalWidth, image.naturalHeight));
-      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-
-      const face = result.faceLandmarks?.[0];
-      if (!face) {
-        setPhotoUrl(canvas.toDataURL("image/jpeg", 0.94));
-        setStatus("No face detected in photo. Try another front-facing selfie.");
-        return;
-      }
-
-      drawLipstickEnhanced(
-        ctx,
-        face,
-        canvas.width,
-        canvas.height,
-        shadeRef.current,
-        finishRef.current,
-        intensityRef.current
-      );
-      if (requestId !== uploadRequestRef.current) return;
-
-      setPhotoUrl(canvas.toDataURL("image/jpeg", 0.94));
-      setStatus("Shade applied! Select colors or finishes to preview.");
-    } catch (err) {
-      console.error("Photo rendering error:", err);
-      if (requestId === uploadRequestRef.current) {
-        setStatus("Could not process photo. Please choose another.");
-      }
+  try {
+    if (!image.complete || !image.naturalWidth || !image.naturalHeight) {
+      return;
     }
-  }, []);
+
+    setStatus("Detecting lips in photo...");
+
+    const detector = await getTryOnFaceDetector();
+
+    if (requestId !== uploadRequestRef.current) return;
+
+    const face = await detectTryOnFace(detector, image);
+
+    if (requestId !== uploadRequestRef.current) return;
+
+    const canvas = uploadCanvasRef.current;
+    if (!canvas) return;
+
+    const scale = Math.min(
+      1,
+      1400 / Math.max(image.naturalWidth, image.naturalHeight)
+    );
+
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    if (!face || face.length < 468) {
+      setPhotoUrl(canvas.toDataURL("image/jpeg", 0.94));
+      setStatus("No face detected in photo. Try another front-facing selfie.");
+      return;
+    }
+
+    // The helper returns normalized landmarks, matching the existing renderer.
+    drawLipstickEnhanced(
+      ctx,
+      face,
+      canvas.width,
+      canvas.height,
+      shadeRef.current,
+      finishRef.current,
+      intensityRef.current
+    );
+
+    if (requestId !== uploadRequestRef.current) return;
+
+    setPhotoUrl(canvas.toDataURL("image/jpeg", 0.94));
+    setStatus("Shade applied! Select colors or finishes to preview.");
+  } catch (error) {
+    console.error("Photo rendering error:", error);
+
+    if (requestId === uploadRequestRef.current) {
+      setStatus("Could not process photo. Please choose another.");
+    }
+  }
+}, []);
+
 
   useEffect(() => {
     if (photoMode && uploadImageRef.current) {
