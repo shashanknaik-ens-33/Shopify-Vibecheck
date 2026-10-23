@@ -1,180 +1,163 @@
+// Face + hand tracking for the virtual try-on.
+//
+// Uses MediaPipe Tasks Vision (already a dependency) with the models and WASM
+// bundled in /public/mediapipe. In VIDEO mode the landmarker keeps tracking the
+// face between frames instead of re-detecting from scratch every time, which is
+// what keeps the lip landmarks stable on slower Windows GPUs/webcams.
+//
+// This replaces the previous TF.js + CDN setup, which ran two separate WebGL
+// runtimes (TF.js WebGL + MediaPipe Face Mesh) at the same time and fetched the
+// model from a CDN on every load.
 
-import * as tf from "@tensorflow/tfjs-core";
-import "@tensorflow/tfjs-converter";
-import "@tensorflow/tfjs-backend-webgl";
+import {
+  FaceLandmarker,
+  HandLandmarker,
+  FilesetResolver,
+} from "@mediapipe/tasks-vision";
 
-import * as faceLandmarks from "@tensorflow-models/face-landmarks-detection";
-import * as handPose from "@tensorflow-models/hand-pose-detection";
-
+let visionPromise = null;
 let faceDetectorPromise = null;
 let handDetectorPromise = null;
 
-async function ensureTensorFlow() {
-  await tf.ready();
+function assetUrl(path) {
+  return new URL(path, window.location.origin).href;
+}
 
-  if (tf.getBackend() !== "webgl") {
-    const changed = await tf.setBackend("webgl");
+function getVision() {
+  if (!visionPromise) {
+    visionPromise = FilesetResolver.forVisionTasks(
+      assetUrl("/mediapipe/wasm")
+    ).catch((error) => {
+      visionPromise = null;
+      throw error;
+    });
+  }
+  return visionPromise;
+}
 
-    if (!changed) {
-      throw new Error("TensorFlow.js WebGL backend is unavailable.");
-    }
-
-    await tf.ready();
+// Try the GPU delegate first, fall back to CPU if the browser/GPU driver
+// refuses it (common on older Windows laptops and remote desktops).
+async function createWithFallback(create) {
+  try {
+    return await create("GPU");
+  } catch (gpuError) {
+    console.warn("[Vibecheck] GPU delegate unavailable, using CPU.", gpuError);
+    return create("CPU");
   }
 }
 
+function createFaceLandmarker(vision, runningMode) {
+  return createWithFallback((delegate) =>
+    FaceLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: assetUrl("/mediapipe/face_landmarker.task"),
+        delegate,
+      },
+      runningMode,
+      numFaces: 1,
+      minFaceDetectionConfidence: 0.5,
+      minFacePresenceConfidence: 0.5,
+      minTrackingConfidence: 0.5,
+    })
+  );
+}
 
-export async function getTryOnFaceDetector() {
+export function getTryOnFaceDetector() {
   if (!faceDetectorPromise) {
     faceDetectorPromise = (async () => {
-      await ensureTensorFlow();
+      const vision = await getVision();
+      const video = await createFaceLandmarker(vision, "VIDEO");
 
-      const detector = await faceLandmarks.createDetector(
-        faceLandmarks.SupportedModels.MediaPipeFaceMesh,
-        {
-          runtime: "mediapipe",
-          maxFaces: 1,
-          refineLandmarks: true,
-          solutionPath:
-            "https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh",
+      // Photo uploads need an IMAGE-mode landmarker; create it lazily.
+      let imagePromise = null;
+      const getImage = () => {
+        if (!imagePromise) {
+          imagePromise = createFaceLandmarker(vision, "IMAGE").catch((e) => {
+            imagePromise = null;
+            throw e;
+          });
         }
-      );
+        return imagePromise;
+      };
 
-      console.log("[Vibecheck] MediaPipe Face Mesh detector initialized.");
-      return detector;
+      return { video, getImage, lastVideoTimestamp: -1 };
     })().catch((error) => {
       faceDetectorPromise = null;
       console.error("[Vibecheck] Face detector initialization failed:", error);
       throw error;
     });
   }
-
   return faceDetectorPromise;
 }
 
-
-export async function getTryOnHandDetector() {
+export function getTryOnHandDetector() {
   if (!handDetectorPromise) {
     handDetectorPromise = (async () => {
-      await ensureTensorFlow();
-
-      return handPose.createDetector(
-        handPose.SupportedModels.MediaPipeHands,
-        {
-          runtime: "tfjs",
-          modelType: "lite",
-          maxHands: 2,
-        }
+      const vision = await getVision();
+      const landmarker = await createWithFallback((delegate) =>
+        HandLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: assetUrl("/mediapipe/hand_landmarker.task"),
+            delegate,
+          },
+          runningMode: "VIDEO",
+          numHands: 2,
+          minHandDetectionConfidence: 0.6,
+          minHandPresenceConfidence: 0.6,
+          minTrackingConfidence: 0.6,
+        })
       );
+      return { landmarker, lastVideoTimestamp: -1 };
     })().catch((error) => {
       handDetectorPromise = null;
       throw error;
     });
   }
-
   return handDetectorPromise;
 }
 
+// MediaPipe requires strictly increasing timestamps in VIDEO mode.
+function nextTimestamp(holder) {
+  const now = performance.now();
+  holder.lastVideoTimestamp =
+    now > holder.lastVideoTimestamp ? now : holder.lastVideoTimestamp + 1;
+  return holder.lastVideoTimestamp;
+}
 
+function isVideo(source) {
+  return typeof HTMLVideoElement !== "undefined" && source instanceof HTMLVideoElement;
+}
+
+const toPoint = (p) => ({ x: p.x, y: p.y, z: p.z ?? 0 });
+
+// Returns normalized (0..1, relative to the source) landmarks, or null.
 export async function detectTryOnFace(detector, source) {
-  if (!detector || !source) {
-    console.warn("[Vibecheck] Face detector or source is missing.");
-    return null;
-  }
-
-  const width =
-    source.videoWidth ||
-    source.naturalWidth ||
-    source.width;
-
-  const height =
-    source.videoHeight ||
-    source.naturalHeight ||
-    source.height;
-
-  if (!width || !height) {
-    console.warn("[Vibecheck] Camera source has no dimensions:", {
-      width,
-      height,
-      readyState: source.readyState,
-    });
-    return null;
-  }
+  if (!detector || !source) return null;
 
   try {
-    const faces = await detector.estimateFaces(source, {
-      flipHorizontal: false,
-    });
-
-    if (!faces?.length) {
-      console.warn("[Vibecheck] Detector returned zero faces.", {
-        width,
-        height,
-        readyState: source.readyState,
-        backend: tf.getBackend(),
-      });
-      return null;
+    let result;
+    if (isVideo(source)) {
+      if (!source.videoWidth || !source.videoHeight) return null;
+      result = detector.video.detectForVideo(source, nextTimestamp(detector));
+    } else {
+      const imageLandmarker = await detector.getImage();
+      result = imageLandmarker.detect(source);
     }
 
-    const face = faces[0];
-    const keypoints = face.keypoints;
-
-    if (!keypoints || keypoints.length < 468) {
-      console.warn("[Vibecheck] Unexpected landmark output:", {
-        faceCount: faces.length,
-        landmarkCount: keypoints?.length ?? 0,
-        faceKeys: Object.keys(face),
-      });
-      return null;
-    }
-
-    const landmarks = keypoints.map((point) => ({
-      x: point.x / width,
-      y: point.y / height,
-      z: point.z ?? 0,
-    }));
-
-    console.log("[Vibecheck] Face detected:", {
-      landmarkCount: landmarks.length,
-      width,
-      height,
-      backend: tf.getBackend(),
-    });
-
-    return landmarks;
+    const points = result?.faceLandmarks?.[0];
+    if (!points || points.length < 468) return null;
+    return points.map(toPoint);
   } catch (error) {
-    console.error("[Vibecheck] estimateFaces failed:", error);
+    console.error("[Vibecheck] Face detection failed:", error);
     throw error;
   }
 }
 
-
+// Returns an array of hands, each an array of normalized landmarks.
 export async function detectTryOnHands(detector, source) {
-  if (!detector || !source) return [];
+  if (!detector || !source || !isVideo(source)) return [];
+  if (!source.videoWidth || !source.videoHeight) return [];
 
-  const hands = await detector.estimateHands(source, {
-    flipHorizontal: false,
-    staticImageMode: false,
-  });
-
-  const width =
-    source.videoWidth ||
-    source.naturalWidth ||
-    source.width;
-
-  const height =
-    source.videoHeight ||
-    source.naturalHeight ||
-    source.height;
-
-  if (!width || !height) return [];
-
-  return (hands || []).map((hand) =>
-    (hand.keypoints || []).map((point) => ({
-      x: point.x / width,
-      y: point.y / height,
-      z: point.z ?? 0,
-    }))
-  );
+  const result = detector.landmarker.detectForVideo(source, nextTimestamp(detector));
+  return (result?.landmarks || []).map((hand) => hand.map(toPoint));
 }
-

@@ -656,10 +656,13 @@ export default function CameraTest() {
   const mouthOccludedRef = useRef(false);
   const isInferringRef = useRef(false);
   const lastFaceTimestampRef = useRef(-1);
-  const lastValidFaceRef = useRef(null);
 const lastHandTimestampRef = useRef(-1);
 const lastConfirmedOcclusionRef = useRef(0);
-const clearMouthFramesRef = useRef(0);
+  // Flicker-proofing: inference writes the target, the render loop eases the
+  // displayed landmarks toward it and fades the lipstick in/out.
+  const targetLandmarksRef = useRef(null);
+  const displayLandmarksRef = useRef(null);
+  const visibilityRef = useRef(0);
   const streamRef = useRef(null);
   const animationRef = useRef(null);
   const runningRef = useRef(false);
@@ -875,6 +878,11 @@ const clearMouthFramesRef = useRef(0);
     handLandmarkerRef.current = null;
     smootherRef.current.reset();
     activeLandmarksRef.current = null;
+    targetLandmarksRef.current = null;
+    displayLandmarksRef.current = null;
+    visibilityRef.current = 0;
+    lastFaceTimestampRef.current = -1;
+    mouthOccludedRef.current = false;
 
     setCameraReady(false);
     setIsFaceDetected(false);
@@ -928,7 +936,7 @@ const initVisionTasks = useCallback(async () => {
               facingMode: mode ? { ideal: mode } : "user",
               width: { ideal: 1280, min: 640 },
               height: { ideal: 720, min: 480 },
-              frameRate: { ideal: 60, min: 30 },
+              frameRate: { ideal: 30 },
             },
             audio: false,
           });
@@ -937,7 +945,7 @@ const initVisionTasks = useCallback(async () => {
             stream = await navigator.mediaDevices.getUserMedia({
               video: {
                 facingMode: mode || "user",
-                frameRate: { ideal: 60 },
+                frameRate: { ideal: 30 },
               },
               audio: false,
             });
@@ -980,7 +988,7 @@ const initVisionTasks = useCallback(async () => {
         initVisionTasks();
 
         const canvas = canvasRef.current;
-        const ctx = canvas?.getContext("2d", { alpha: false, desynchronized: true });
+        const ctx = canvas?.getContext("2d", { alpha: false });
         if (!canvas || !ctx) {
           throw new Error("Could not initialize the preview canvas.");
         }
@@ -990,111 +998,120 @@ const initVisionTasks = useCallback(async () => {
         // --------------------------------------------------------------------
         // DECOUPLED INFERENCE WORKER LOOP (Never blocks the 60fps render loop!)
         // --------------------------------------------------------------------
+        const FACE_HOLD_MS = 450; // keep the lipstick through brief tracking misses
         let lastInferenceTime = 0;
+        let minInferenceInterval = 33;
+        let lastVideoTime = -1;
+        let handStep = 0;
+        let lastHandsRaw = [];
+        let coveredStreak = 0;
+        let clearStreak = 0;
 
-        
-const runInferenceStep = async (now) => {
-  if (
-    isInferringRef.current ||
-    !landmarkerRef.current ||
-    !video ||
-    video.readyState < 2
-  ) {
-    return;
-  }
+        const runInferenceStep = async (now) => {
+          if (
+            isInferringRef.current ||
+            !landmarkerRef.current ||
+            !video ||
+            video.readyState < 2
+          ) {
+            return;
+          }
 
-  if (now - lastInferenceTime < 50) return;
-  lastInferenceTime = now;
-  isInferringRef.current = true;
+          // Only run when the camera produced a new frame, and never faster
+          // than this machine can keep up with.
+          if (video.currentTime === lastVideoTime) return;
+          if (now - lastInferenceTime < minInferenceInterval) return;
 
-  try {
-    const face = await detectTryOnFace(
-      landmarkerRef.current,
-      video
-    );
+          lastVideoTime = video.currentTime;
+          lastInferenceTime = now;
+          isInferringRef.current = true;
+          const startedAt = performance.now();
 
-    console.log("[Vibecheck] Face detection:", {
-  detected: !!face,
-  landmarkCount: face?.length ?? 0,
-  mouthOccluded: mouthOccludedRef.current,
-});
+          try {
+            const face = await detectTryOnFace(landmarkerRef.current, video);
+            if (!runningRef.current) return;
 
-    if (!runningRef.current) return;
+            if (!face) {
+              // Do NOT clear anything here. The render loop keeps drawing the
+              // last good landmarks for FACE_HOLD_MS and then fades out.
+              if (performance.now() - lastFaceTimestampRef.current > FACE_HOLD_MS) {
+                setIsFaceDetected(false);
+              }
+              return;
+            }
 
-    if (!face) {
-  // Preserve the last valid face briefly to prevent flicker.
-  const elapsed =
-    performance.now() - lastFaceTimestampRef.current;
+            const crop = getCameraCrop(video, canvas, zoomRef.current);
+            const cropped = cropLandmarks(face, crop, video);
 
-  if (
-    !mouthOccludedRef.current &&
-    lastValidFaceRef.current &&
-    elapsed < 180
-  ) {
-    activeLandmarksRef.current = lastValidFaceRef.current;
-  } else {
-    activeLandmarksRef.current = null;
-  }
+            // ---- Hand-over-mouth detection (every 2nd step, with hysteresis) ----
+            if (handLandmarkerRef.current) {
+              handStep += 1;
+              if (handStep % 2 === 0) {
+                lastHandsRaw = await detectTryOnHands(
+                  handLandmarkerRef.current,
+                  video
+                );
+                if (!runningRef.current) return;
 
-  setIsFaceDetected(false);
-  return;
-}
+                const croppedHands = lastHandsRaw.map((hand) =>
+                  hand.map((point) => ({
+                    ...point,
+                    x: (point.x * video.videoWidth - crop.sx) / crop.sw,
+                    y: (point.y * video.videoHeight - crop.sy) / crop.sh,
+                  }))
+                );
 
-    const crop = getCameraCrop(video, canvas, zoomRef.current);
-    const cropped = cropLandmarks(face, crop, video);
+                if (isHandCoveringMouth(cropped, croppedHands)) {
+                  coveredStreak += 1;
+                  clearStreak = 0;
+                  // One noisy frame must not hide the lipstick.
+                  if (coveredStreak >= 2) {
+                    mouthOccludedRef.current = true;
+                    lastConfirmedOcclusionRef.current = performance.now();
+                  }
+                } else {
+                  coveredStreak = 0;
+                  if (mouthOccludedRef.current) {
+                    clearStreak += 1;
+                    if (
+                      clearStreak >= 3 &&
+                      performance.now() - lastConfirmedOcclusionRef.current > 250
+                    ) {
+                      mouthOccludedRef.current = false;
+                      clearStreak = 0;
+                    }
+                  }
+                }
+              }
+            } else {
+              mouthOccludedRef.current = false;
+            }
 
-    if (handLandmarkerRef.current) {
-      const hands = await detectTryOnHands(
-        handLandmarkerRef.current,
-        video
-      );
+            // ---- Smooth + publish the new target ----
+            const wasLost =
+              !targetLandmarksRef.current ||
+              performance.now() - lastFaceTimestampRef.current > FACE_HOLD_MS;
+            if (wasLost) smootherRef.current.reset();
 
-      if (!runningRef.current) return;
+            const smoothed = smootherRef.current.filter(cropped, now);
+            targetLandmarksRef.current = smoothed;
+            if (wasLost || !displayLandmarksRef.current) {
+              // Snap (don't glide) when the face is re-acquired.
+              displayLandmarksRef.current = smoothed.map((p) => ({ ...p }));
+            }
+            lastFaceTimestampRef.current = performance.now();
+            setIsFaceDetected(true);
+          } catch (error) {
+            console.warn("Try-on inference skipped:", error);
+          } finally {
+            const took = performance.now() - startedAt;
+            // Adapt to slower machines instead of flooding them.
+            minInferenceInterval = Math.min(100, Math.max(33, took * 1.5));
+            isInferringRef.current = false;
+          }
+        };
 
-      const croppedHands = hands.map((hand) =>
-  hand.map((point) => ({
-    ...point,
-    x: (point.x * video.videoWidth - crop.sx) / crop.sw,
-    y: (point.y * video.videoHeight - crop.sy) / crop.sh,
-  }))
-);
-
-const isCovered = isHandCoveringMouth(cropped, croppedHands);
-
-      if (isCovered) {
-        lastConfirmedOcclusionRef.current = performance.now();
-        mouthOccludedRef.current = true;
-        clearMouthFramesRef.current = 0;
-      } else if (mouthOccludedRef.current) {
-        clearMouthFramesRef.current += 1;
-
-        if (
-          performance.now() - lastConfirmedOcclusionRef.current > 180 &&
-          clearMouthFramesRef.current >= 3
-        ) {
-          mouthOccludedRef.current = false;
-          clearMouthFramesRef.current = 0;
-        }
-      }
-    } else {
-  // Keep lipstick visible when face tracking works
-  // but the optional hand detector is unavailable.
-  mouthOccludedRef.current = false;
-  clearMouthFramesRef.current = 0;
-}
-
-    const smoothed = smootherRef.current.filter(cropped, now);
-    lastFaceTimestampRef.current = performance.now();
-    lastValidFaceRef.current = smoothed;
-    activeLandmarksRef.current = smoothed;
-    setIsFaceDetected(true);
-  } catch (error) {
-    console.warn("Try-on inference skipped:", error);
-  } finally {
-    isInferringRef.current = false;
-  }
-};
-
+        let lastRenderTime = performance.now();
 
         // --------------------------------------------------------------------
         // PRIMARY RENDER LOOP (Native 60 FPS RequestAnimationFrame)
@@ -1145,17 +1162,44 @@ const isCovered = isHandCoveringMouth(cropped, croppedHands);
               );
               ctx.restore();
 
-              // 2. Trigger asynchronous landmark inference in parallel
-              runInferenceStep(now);
+              // 2. Ease displayed landmarks toward the latest tracked ones and
+              //    fade the lipstick in/out so tracking blips never pop.
+              const dtMs = Math.min(100, Math.max(1, now - lastRenderTime));
+              lastRenderTime = now;
 
-              // 3. Render lipstick overlay using current 1€ filtered landmarks
-              const smoothed = activeLandmarksRef.current;
-                if (smoothed && !mouthOccludedRef.current) {
+              const target = targetLandmarksRef.current;
+              const faceFresh =
+                !!target &&
+                performance.now() - lastFaceTimestampRef.current < FACE_HOLD_MS;
+              const wantVisible = faceFresh && !mouthOccludedRef.current;
+              visibilityRef.current = wantVisible
+                ? Math.min(1, visibilityRef.current + dtMs / 90)
+                : Math.max(0, visibilityRef.current - dtMs / 160);
+
+              let disp = displayLandmarksRef.current;
+              if (target) {
+                if (!disp || disp.length !== target.length) {
+                  disp = target.map((p) => ({ ...p }));
+                } else {
+                  const k = 1 - Math.exp(-dtMs / 35);
+                  for (let i = 0; i < target.length; i++) {
+                    disp[i].x += (target[i].x - disp[i].x) * k;
+                    disp[i].y += (target[i].y - disp[i].y) * k;
+                    disp[i].z += (target[i].z - disp[i].z) * k;
+                  }
+                }
+                displayLandmarksRef.current = disp;
+              }
+
+              // 3. Render lipstick overlay
+              const smoothed = displayLandmarksRef.current;
+              const visibility = visibilityRef.current;
+              if (smoothed && visibility > 0.01) {
                 const isSplit = splitModeRef.current;
                 const ratio = splitRatioRef.current;
                 const currentColor = shadeRef.current;
                 const currentFinish = finishRef.current;
-                const currentIntensity = intensityRef.current;
+                const currentIntensity = intensityRef.current * visibility;
 
                 if (isSplit) {
                   // BEFORE / AFTER SPLIT VIEW
@@ -1233,6 +1277,9 @@ const isCovered = isHandCoveringMouth(cropped, croppedHands);
               }
             }
           }
+
+          // Inference runs after this frame has been painted.
+          runInferenceStep(now);
 
           animationRef.current = requestAnimationFrame(renderFrame);
         };
