@@ -1652,33 +1652,11 @@ const renderUploadedPhoto = useCallback(async (image) => {
                 ✕
               </button>
             )}
-            <div style={styles.productBadge}>
-              <span style={styles.sparkleDot}>✨</span>
-              <span style={styles.productBadgeText}>
-                {currentProduct.title || "Virtual Try-On"}
-              </span>
-            </div>
+            
           </div>
 
           {/* Real-time Tracking & FPS Pill */}
-          <div style={styles.hudStatusPill}>
-            <span
-              style={{
-                ...styles.hudLiveIndicator,
-                backgroundColor: isFaceDetected ? "#10B981" : "#F59E0B",
-                boxShadow: isFaceDetected
-                  ? "0 0 10px rgba(16, 185, 129, 0.7)"
-                  : "0 0 8px rgba(245, 158, 11, 0.5)",
-              }}
-            />
-            <span style={styles.hudStatusText}>
-              {!photoMode
-                ? isFaceDetected
-                  ? `Lips Locked • ${fps} FPS`
-                  : "Align Face"
-                : "Photo Mode"}
-            </span>
-          </div>
+          
 
           {/* Quick Toolbar (Fullscreen & Lighting) */}
           <div style={styles.topHudRight}>
@@ -1891,63 +1869,17 @@ const renderUploadedPhoto = useCallback(async (image) => {
         <section style={styles.bottomDrawer}>
           {/* Navigation Pill Tabs */}
           <nav style={styles.tabNav}>
-            <button
-              type="button"
-              onClick={() => setActiveTab("shades")}
-              style={{
-                ...styles.tabPill,
-                ...(activeTab === "shades" ? styles.tabPillActive : {}),
-              }}
-            >
-              💄 SHADES
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab("finishes")}
-              style={{
-                ...styles.tabPill,
-                ...(activeTab === "finishes" ? styles.tabPillActive : {}),
-              }}
-            >
-              ✨ FINISH
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab("intensity")}
-              style={{
-                ...styles.tabPill,
-                ...(activeTab === "intensity" ? styles.tabPillActive : {}),
-              }}
-            >
-              🎚️ INTENSITY
-            </button>
-
-            {catalog.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setActiveTab("products")}
-                style={{
-                  ...styles.tabPill,
-                  ...(activeTab === "products" ? styles.tabPillActive : {}),
-                }}
-              >
-                🛍️ PRODUCTS ({catalog.length})
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={() => setActiveTab("custom")}
-              style={{
-                ...styles.tabPill,
-                ...(activeTab === "custom" ? styles.tabPillActive : {}),
-              }}
-            >
-              🎨 CUSTOM
-            </button>
-          </nav>
+  <button
+    type="button"
+    onClick={() => setActiveTab("shades")}
+    style={{
+      ...styles.tabPill,
+      ...styles.tabPillActive,
+    }}
+  >
+    💄 SHADES
+  </button>
+</nav>
 
           {/* Interactive Tab Panels */}
           <div style={styles.tabPanelBody}>
