@@ -146,9 +146,9 @@ class MultiLandmarkSmoother {
         // minCutoff = 0.85 Hz: stops static sub-pixel sensor jitter completely
         // beta = 0.015: responsive tracking when head turns or mouth moves
         f = {
-          x: new OneEuroFilter(1.2, 0.025, 1.0),
-          y: new OneEuroFilter(1.2, 0.025, 1.0),
-          z: new OneEuroFilter(1.2, 0.025, 1.0),
+          x: new OneEuroFilter(1.5, 12, 1.0),
+          y: new OneEuroFilter(1.5, 12, 1.0),
+          z: new OneEuroFilter(1.5, 12, 1.0),
         };
         this.filters.set(index, f);
       }
@@ -936,7 +936,7 @@ const initVisionTasks = useCallback(async () => {
               facingMode: mode ? { ideal: mode } : "user",
               width: { ideal: 1280, min: 640 },
               height: { ideal: 720, min: 480 },
-              frameRate: { ideal: 30 },
+              frameRate: { ideal: 60 },
             },
             audio: false,
           });
@@ -945,7 +945,7 @@ const initVisionTasks = useCallback(async () => {
             stream = await navigator.mediaDevices.getUserMedia({
               video: {
                 facingMode: mode || "user",
-                frameRate: { ideal: 30 },
+                frameRate: { ideal: 60 },
               },
               audio: false,
             });
@@ -1000,7 +1000,7 @@ const initVisionTasks = useCallback(async () => {
         // --------------------------------------------------------------------
         const FACE_HOLD_MS = 450; // keep the lipstick through brief tracking misses
         let lastInferenceTime = 0;
-        let minInferenceInterval = 33;
+        let minInferenceInterval = 16;
         let lastVideoTime = -1;
         let handStep = 0;
         let lastHandsRaw = [];
@@ -1106,7 +1106,7 @@ const initVisionTasks = useCallback(async () => {
           } finally {
             const took = performance.now() - startedAt;
             // Adapt to slower machines instead of flooding them.
-            minInferenceInterval = Math.min(100, Math.max(33, took * 1.5));
+            minInferenceInterval = Math.min(100, Math.max(16, took * 1.15));
             isInferringRef.current = false;
           }
         };
@@ -1181,7 +1181,7 @@ const initVisionTasks = useCallback(async () => {
                 if (!disp || disp.length !== target.length) {
                   disp = target.map((p) => ({ ...p }));
                 } else {
-                  const k = 1 - Math.exp(-dtMs / 35);
+                  const k = 1 - Math.exp(-dtMs / 14);
                   for (let i = 0; i < target.length; i++) {
                     disp[i].x += (target[i].x - disp[i].x) * k;
                     disp[i].y += (target[i].y - disp[i].y) * k;
@@ -1581,9 +1581,25 @@ const renderUploadedPhoto = useCallback(async (image) => {
     splitRatioRef.current = ratio;
   };
 
+  // ---- Redesign: derived values for the UI ----
+  const accent = /^#[0-9a-f]{6}$/i.test(shade || "") ? shade : "#B5304A";
+  const accentInk = (() => {
+    const n = parseInt(accent.slice(1), 16);
+    const l = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+    return l > 0.62 ? "#1a1117" : "#fbf6f1";
+  })();
+  const cleanName = (n) => String(n || "").replace(/^.*?\s[-\u2013\u2014]\s/, "");
+  const selectedShade = availableShades.find(
+    (item) =>
+      activeVariantId === item.id ||
+      (shade || "").toLowerCase() === item.hex.toLowerCase()
+  );
+  const shadeLabel = selectedShade ? cleanName(selectedShade.name) : "Custom shade";
+
   return (
     <>
       <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Manrope:wght@400;500;600;700&display=swap');
         html, body {
           margin: 0 !important;
           padding: 0 !important;
@@ -1591,33 +1607,33 @@ const renderUploadedPhoto = useCallback(async (image) => {
           height: 100% !important;
           max-height: 100% !important;
           overflow: hidden !important;
-          background: #09090c !important;
+          background: #120d14 !important;
           -webkit-font-smoothing: antialiased;
           -moz-osx-font-smoothing: grayscale;
-          font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+          font-family: Manrope, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
           user-select: none;
           -webkit-user-select: none;
         }
-        *, *::before, *::after {
-          box-sizing: border-box;
-        }
-        @keyframes studio-spin {
-          to { transform: rotate(360deg); }
-        }
+        *, *::before, *::after { box-sizing: border-box; }
+        button { font-family: inherit; -webkit-tap-highlight-color: transparent; }
+        button:focus-visible { outline: 2px solid #f6efe9; outline-offset: 3px; }
+        @keyframes studio-spin { to { transform: rotate(360deg); } }
         @keyframes studio-pulse {
           0%, 100% { opacity: 0.55; transform: scale(0.97); }
           50% { opacity: 1; transform: scale(1.04); }
         }
-        @keyframes studio-flash {
-          0% { opacity: 0.95; }
-          100% { opacity: 0; }
+        @keyframes studio-flash { 0% { opacity: 0.9; } 100% { opacity: 0; } }
+        @keyframes sheet-rise {
+          from { opacity: 0; transform: translateY(26px); }
+          to { opacity: 1; transform: translateY(0); }
         }
-        @keyframes subtle-float {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-3px); }
-        }
-        .vibe-scroll::-webkit-scrollbar {
-          display: none;
+        .vibe-scroll { scrollbar-width: none; scroll-snap-type: x proximity; }
+        .vibe-scroll::-webkit-scrollbar { display: none; }
+        .vibe-swatch { transition: transform .25s cubic-bezier(.2,.8,.2,1); }
+        .vibe-swatch:active { transform: scale(.92); }
+        .vibe-press:active { transform: scale(.94); }
+        @media (prefers-reduced-motion: reduce) {
+          * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
         }
       `}</style>
 
@@ -1626,6 +1642,8 @@ const renderUploadedPhoto = useCallback(async (image) => {
         style={{
           ...styles.wrapper,
           ...(embedded ? styles.wrapperEmbedded : {}),
+          "--accent": accent,
+          "--accent-ink": accentInk,
         }}
       >
         <canvas ref={uploadCanvasRef} style={{ display: "none" }} aria-hidden="true" />
@@ -1640,58 +1658,32 @@ const renderUploadedPhoto = useCallback(async (image) => {
         {/* ------------------------------------------------------------- */}
         {/* TOP BRAND & STATUS HUD (Floating Glass Overlay) */}
         {/* ------------------------------------------------------------- */}
+        <div style={styles.topScrim} aria-hidden="true" />
         <header style={styles.topHud}>
-          <div style={styles.topHudLeft}>
+          <div>
             {embedded && (
               <button
                 type="button"
                 onClick={closeSelf}
-                title="Close virtual try-on"
-                style={styles.closeGlassBtn}
+                title="Close"
+                aria-label="Close virtual try-on"
+                className="vibe-press"
+                style={styles.glassBtn}
               >
-                ✕
+                <Ico n="close" />
               </button>
             )}
-            
           </div>
-
-          {/* Real-time Tracking & FPS Pill */}
-          
-
-          {/* Quick Toolbar (Fullscreen & Lighting) */}
-          <div style={styles.topHudRight}>
-            <button
-              type="button"
-              onClick={toggleLightingBoost}
-              title={`Toggle Low-light Beauty Boost (${lightingBoost ? "ON" : "OFF"})`}
-              style={{
-                ...styles.hudToolBtn,
-                ...(lightingBoost ? styles.hudToolBtnActive : {}),
-              }}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="5" />
-                <line x1="12" y1="1" x2="12" y2="3" />
-                <line x1="12" y1="21" x2="12" y2="23" />
-                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-                <line x1="1" y1="12" x2="3" y2="12" />
-                <line x1="21" y1="12" x2="23" y2="12" />
-                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              onClick={toggleFullscreen}
-              title="Toggle Fullscreen"
-              style={styles.hudToolBtn}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
-              </svg>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            title="Fullscreen"
+            aria-label="Toggle fullscreen"
+            className="vibe-press"
+            style={styles.glassBtn}
+          >
+            <Ico n="expand" />
+          </button>
         </header>
 
         {/* ------------------------------------------------------------- */}
@@ -1738,7 +1730,7 @@ const renderUploadedPhoto = useCallback(async (image) => {
               {!cameraReady && (
                 <div style={styles.loadingOverlay}>
                   <div style={styles.loadingPulseIcon}>
-                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#e5c07b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#f6efe9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
                       <circle cx="12" cy="13" r="4" />
                     </svg>
@@ -1751,14 +1743,14 @@ const renderUploadedPhoto = useCallback(async (image) => {
                       onClick={() => startCamera()}
                       style={styles.primaryActionButton}
                     >
-                      Connect Live Camera
+                      Turn on camera
                     </button>
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
                       style={styles.secondaryActionButton}
                     >
-                      Upload Photo
+                      Use a photo
                     </button>
                   </div>
                 </div>
@@ -1768,355 +1760,93 @@ const renderUploadedPhoto = useCallback(async (image) => {
             <img src={photoUrl} alt="Try on preview" style={styles.capturedPhoto} />
           )}
 
-          {/* Right Floating Control Pill Toolbar */}
-          <aside style={styles.floatingToolbar} aria-label="Camera Controls">
-            <button
-              type="button"
-              title={`Flip Camera (currently ${facingMode === "user" ? "front" : "rear"})`}
-              onClick={toggleFlipCamera}
-              style={styles.sideToolButton}
-            >
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M20 10c0-4.418-3.582-8-8-8s-8 3.582-8 8c0 1.954.702 3.745 1.87 5.143L4 18h6v-6l-2.09 2.09C7.03 12.91 6.5 11.52 6.5 10c0-3.038 2.462-5.5 5.5-5.5s5.5 2.462 5.5 5.5-2.462 5.5-5.5 5.5v2.5c4.418 0 8-3.582 8-8z" />
-              </svg>
+          {/* Control rail: one quiet capsule instead of five floating discs */}
+          <aside style={styles.rail} aria-label="Camera controls">
+            <button type="button" className="vibe-press" onClick={toggleFlipCamera}
+              title="Flip camera" aria-label="Flip camera" style={styles.railBtn}>
+              <Ico n="flip" />
             </button>
-
-            <button
-              type="button"
-              title={`Zoom: ${zoom.toFixed(2)}x`}
-              onClick={handleZoomToggle}
-              style={{
-                ...styles.sideToolButton,
-                ...(zoom > 1.0 ? styles.sideToolButtonActive : {}),
-              }}
-            >
-              <span style={{ fontSize: 11, fontWeight: 700 }}>
-                {zoom.toFixed(1)}x
-              </span>
+            <button type="button" className="vibe-press" onClick={handleZoomToggle}
+              title={`Zoom ${zoom.toFixed(1)}x`} aria-label="Change zoom"
+              style={{ ...styles.railBtn, ...(zoom > 1.0 ? styles.railBtnOn : {}) }}>
+              <span style={{ fontSize: 12, fontWeight: 600, letterSpacing: 0.2 }}>{zoom.toFixed(1)}×</span>
             </button>
-
-            <button
-              type="button"
-              title={`Before / After Split (${Math.round(splitRatio * 100)}%)`}
-              onClick={toggleSplitMode}
-              style={{
-                ...styles.sideToolButton,
-                ...(splitMode ? styles.sideToolButtonActive : {}),
-              }}
-            >
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="3" />
-                <line x1="12" y1="3" x2="12" y2="21" strokeDasharray="3 3" />
-              </svg>
+            <button type="button" className="vibe-press" onClick={toggleSplitMode}
+              title="Compare before and after" aria-label="Compare before and after"
+              style={{ ...styles.railBtn, ...(splitMode ? styles.railBtnOn : {}) }}>
+              <Ico n="split" />
             </button>
-
-            <button
-              type="button"
-              title="Upload Selfie Photo"
-              onClick={() => fileInputRef.current?.click()}
-              style={styles.sideToolButton}
-            >
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                <circle cx="8.5" cy="8.5" r="1.5" />
-                <polyline points="21 15 16 10 5 21" />
-              </svg>
-            </button>
-
-            <button
-              type="button"
-              title="Save Snapshot Photo"
-              onClick={handleDownloadSnapshot}
-              style={styles.sideToolButton}
-            >
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
+            <button type="button" className="vibe-press" onClick={toggleLightingBoost}
+              title="Low-light boost" aria-label="Low-light boost"
+              style={{ ...styles.railBtn, ...(lightingBoost ? styles.railBtnOn : {}) }}>
+              <Ico n="light" />
             </button>
           </aside>
-
-          {/* Central Shutter Capture Button */}
-          <div style={styles.shutterContainer}>
-            {!photoMode ? (
-              <button
-                type="button"
-                onClick={capturePhoto}
-                title="Capture snapshot"
-                style={styles.shutterButton}
-              >
-                <div style={styles.shutterRing}>
-                  <div style={styles.shutterCenter} />
-                </div>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={retakePhoto}
-                title="Return to live camera"
-                style={styles.retakeLiveButton}
-              >
-                ↺ Retake Live Camera
-              </button>
-            )}
-          </div>
         </div>
 
         {/* ------------------------------------------------------------- */}
-        {/* 30% LUXURY BEAUTY CONTROL DRAWER */}
+        {/* BOTTOM SHEET: floats over the camera, no hard edge             */}
         {/* ------------------------------------------------------------- */}
-        <section style={styles.bottomDrawer}>
-          {/* Navigation Pill Tabs */}
-          <nav style={styles.tabNav}>
-  <button
-    type="button"
-    onClick={() => setActiveTab("shades")}
-    style={{
-      ...styles.tabPill,
-      ...styles.tabPillActive,
-    }}
-  >
-    💄 SHADES
-  </button>
-</nav>
-
-          {/* Interactive Tab Panels */}
-          <div style={styles.tabPanelBody}>
-            {/* 1. SHADES TAB */}
-            {activeTab === "shades" && (
-              <div style={styles.horizontalScrollTrack} className="vibe-scroll">
-                {availableShades.map((item) => {
-                  const isSelected =
-                    activeVariantId === item.id ||
-                    shade.toLowerCase() === item.hex.toLowerCase();
-                  return (
-                    <button
-                      key={item.id || item.name}
-                      type="button"
-                      onClick={() => selectVariant(item)}
-                      title={`${item.name} (${item.hex})`}
-                      style={{
-                        ...styles.shadeCard,
-                        ...(isSelected ? styles.shadeCardSelected : {}),
-                      }}
-                    >
-                      <div style={styles.shadeCircleWrapper}>
-                        <div
-                          style={{
-                            ...styles.shadeCircle,
-                            backgroundColor: item.hex,
-                          }}
-                        />
-                        {isSelected && (
-                          <div style={styles.shadeSelectedIndicator} />
-                        )}
-                      </div>
-                      <span style={styles.shadeNameLabel}>{item.name}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* 2. FINISHES TAB */}
-            {activeTab === "finishes" && (
-              <div style={styles.finishesTrack}>
-                {PRESET_FINISHES.map((f) => {
-                  const isSelected = finish === f.id;
-                  return (
-                    <button
-                      key={f.id}
-                      type="button"
-                      onClick={() => handleFinishChange(f.id)}
-                      style={{
-                        ...styles.finishCard,
-                        ...(isSelected ? styles.finishCardSelected : {}),
-                      }}
-                    >
-                      <span style={styles.finishTitle}>{f.label}</span>
-                      <span style={styles.finishSubtitle}>{f.desc}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* 3. INTENSITY TAB */}
-            {activeTab === "intensity" && (
-              <div style={styles.intensityPanel}>
-                <div style={styles.sliderHeaderRow}>
-                  <span style={styles.sliderLabel}>Coverage & Pigmentation</span>
-                  <span style={styles.sliderValueBadge}>
-                    {Math.round(intensity * 100)}%
-                  </span>
-                </div>
-                <div style={styles.sliderWrapper}>
-                  <span style={styles.sliderMinMax}>Sheer</span>
-                  <input
-                    type="range"
-                    min="0.2"
-                    max="1.0"
-                    step="0.02"
-                    value={intensity}
-                    onChange={(e) => handleIntensityChange(e.target.value)}
-                    style={styles.intensitySlider}
-                  />
-                  <span style={styles.sliderMinMax}>Bold</span>
-                </div>
-              </div>
-            )}
-
-            {/* 4. PRODUCTS CATALOG TAB */}
-            {activeTab === "products" && (
-              <div style={styles.horizontalScrollTrack} className="vibe-scroll">
-                {catalog.map((prod) => {
-                  const isSelected = String(prod.id) === String(currentProduct.id);
-                  return (
-                    <button
-                      key={prod.id}
-                      type="button"
-                      onClick={() => selectProduct(prod)}
-                      title={`${prod.title} — ${prod.price || ""}`}
-                      style={{
-                        ...styles.productCard,
-                        ...(isSelected ? styles.productCardSelected : {}),
-                      }}
-                    >
-                      <div style={styles.productThumbWrap}>
-                        {prod.image ? (
-                          <img
-                            src={prod.image}
-                            alt={prod.title}
-                            style={styles.productThumbImg}
-                          />
-                        ) : (
-                          <div style={styles.productThumbPlaceholder}>💄</div>
-                        )}
-                      </div>
-                      <span style={styles.productCardTitle}>{prod.title}</span>
-                      {prod.price && (
-                        <span style={styles.productCardPrice}>{prod.price}</span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* 5. CUSTOM COLOR PICKER TAB */}
-            {activeTab === "custom" && (
-              <div style={styles.customColorPanel}>
-                <div style={styles.customColorRow}>
-                  <input
-                    type="color"
-                    value={customHex}
-                    onChange={(e) => {
-                      setCustomHex(e.target.value);
-                      applyShade(e.target.value);
-                    }}
-                    style={styles.nativeColorInput}
-                  />
-                  <input
-                    type="text"
-                    value={hexInput}
-                    onChange={(e) => {
-                      const val = e.target.value.toUpperCase();
-                      setHexInput(val);
-                      if (/^#[0-9A-F]{6}$/.test(val)) {
-                        setCustomHex(val);
-                        applyShade(val);
-                      }
-                    }}
-                    placeholder="#D71940"
-                    style={styles.hexTextInput}
-                  />
-                  <div
-                    style={{
-                      ...styles.activeColorIndicator,
-                      backgroundColor: shade,
-                    }}
-                  />
-                </div>
-                {/* Fast Color Swatches */}
-                <div style={styles.quickSwatchesRow}>
-                  {["#6B1835", "#D71940", "#B80F2E", "#FF6F61", "#E75480", "#C68670", "#6F4E37"].map(
-                    (quickHex) => (
-                      <button
-                        key={quickHex}
-                        type="button"
-                        onClick={() => applyShade(quickHex)}
-                        style={{
-                          ...styles.quickSwatchCircle,
-                          backgroundColor: quickHex,
-                          outline:
-                            shade.toLowerCase() === quickHex.toLowerCase()
-                              ? "2px solid #ffffff"
-                              : "none",
-                        }}
-                      />
-                    )
-                  )}
-                </div>
-              </div>
-            )}
+        <section style={styles.sheet}>
+          <div style={styles.shadeHead}>
+            <span style={styles.productLine}>{currentProduct.title}</span>
+            <span style={styles.shadeName}>{shadeLabel}</span>
           </div>
 
-          {/* Bottom Action Footer */}
-          <footer style={styles.drawerFooter}>
-            {!photoMode ? (
-              <>
+          <div style={styles.swatchTrack} className="vibe-scroll" role="group" aria-label="Lipstick shades">
+            {availableShades.map((item) => {
+              const isSelected =
+                activeVariantId === item.id ||
+                (shade || "").toLowerCase() === item.hex.toLowerCase();
+              return (
                 <button
+                  key={item.id || item.name}
                   type="button"
-                  onClick={capturePhoto}
-                  style={styles.luxuryButtonPrimary}
-                >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-                    <circle cx="12" cy="13" r="4" />
-                  </svg>
-                  <span>Snapshot</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  style={styles.luxuryButtonSecondary}
-                >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                    <circle cx="8.5" cy="8.5" r="1.5" />
-                    <polyline points="21 15 16 10 5 21" />
-                  </svg>
-                  <span>Upload Photo</span>
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={retakePhoto}
-                  style={styles.luxuryButtonPrimary}
-                >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M20 10c0-4.418-3.582-8-8-8s-8 3.582-8 8c0 1.954.702 3.745 1.87 5.143L4 18h6v-6l-2.09 2.09C7.03 12.91 6.5 11.52 6.5 10c0-3.038 2.462-5.5 5.5-5.5s5.5 2.462 5.5 5.5-2.462 5.5-5.5 5.5v2.5c4.418 0 8-3.582 8-8z" />
-                  </svg>
-                  <span>Live Camera</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDownloadSnapshot}
-                  style={styles.luxuryButtonSecondary}
-                >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="7 10 12 15 17 10" />
-                    <line x1="12" y1="15" x2="12" y2="3" />
-                  </svg>
-                  <span>Save Photo</span>
-                </button>
-              </>
-            )}
-          </footer>
+                  className="vibe-swatch"
+                  onClick={() => selectVariant(item)}
+                  title={cleanName(item.name)}
+                  aria-label={cleanName(item.name)}
+                  aria-pressed={isSelected}
+                  style={{
+                    ...styles.swatch,
+                    backgroundColor: item.hex,
+                    ...(isSelected ? styles.swatchOn : {}),
+                  }}
+                />
+              );
+            })}
+          </div>
+
+          {!photoMode ? (
+            <div style={styles.actions}>
+              <button type="button" className="vibe-press" onClick={() => fileInputRef.current?.click()}
+                style={styles.sideAction} aria-label="Upload a photo">
+                <span style={styles.sideActionIcon}><Ico n="photo" /></span>
+                <span style={styles.sideActionLabel}>Photo</span>
+              </button>
+
+              <button type="button" className="vibe-press" onClick={capturePhoto}
+                title="Take snapshot" aria-label="Take snapshot" style={styles.shutter}>
+                <span style={styles.shutterCore} />
+              </button>
+
+              <button type="button" className="vibe-press" onClick={handleDownloadSnapshot}
+                style={styles.sideAction} aria-label="Save snapshot">
+                <span style={styles.sideActionIcon}><Ico n="save" /></span>
+                <span style={styles.sideActionLabel}>Save</span>
+              </button>
+            </div>
+          ) : (
+            <div style={styles.actionsPhoto}>
+              <button type="button" className="vibe-press" onClick={retakePhoto} style={styles.ghostPill}>
+                <Ico n="flip" /> Back to camera
+              </button>
+              <button type="button" className="vibe-press" onClick={handleDownloadSnapshot}
+                style={{ ...styles.solidPill, background: accent, color: accentInk }}>
+                <Ico n="save" /> Save photo
+              </button>
+            </div>
+          )}
         </section>
       </div>
     </>
@@ -2124,687 +1854,206 @@ const renderUploadedPhoto = useCallback(async (image) => {
 }
 
 // ============================================================================
-// LUXURY MODERN BEAUTY AR DESIGN SYSTEM STYLES
+// REDESIGN: "lacquer & pearl" — plum-ink glass over the camera, pearl type,
+// and one accent that follows the lipstick shade the shopper is wearing.
 // ============================================================================
+const ICONS = {
+  close: <path d="M6 6l12 12M18 6L6 18" />,
+  expand: <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />,
+  flip: <path d="M3 12a9 9 0 0 1 15.5-6.2L21 8M21 3v5h-5M21 12a9 9 0 0 1-15.5 6.2L3 16M3 21v-5h5" />,
+  split: (<><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M12 4v16" /></>),
+  light: (<><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>),
+  photo: (<><rect x="3" y="3" width="18" height="18" rx="3" /><circle cx="9" cy="9" r="1.6" /><path d="M21 15l-5-5L5 21" /></>),
+  save: <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />,
+};
+
+const Ico = ({ n, size = 18 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {ICONS[n]}
+  </svg>
+);
+
+const INK = "#120d14";
+const PEARL = "#f6efe9";
+const MUTED = "#b9aab2";
+const GLASS = "rgba(24, 17, 28, 0.5)";
+const HAIRLINE = "1px solid rgba(246, 239, 233, 0.14)";
+const BLUR = "blur(18px) saturate(1.2)";
+const EASE = "cubic-bezier(.2,.8,.2,1)";
+
 const styles = {
   wrapper: {
-    position: "fixed",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    width: "100vw",
-    height: "100vh",
-    maxWidth: 480,
-    margin: "0 auto",
-    color: "#ffffff",
-    background: "#09090c",
-    borderRadius: 24,
-    overflow: "hidden",
+    position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+    width: "100vw", height: "100vh", maxWidth: 480, margin: "0 auto",
+    color: PEARL, background: INK, borderRadius: 28, overflow: "hidden",
     boxShadow: "0 25px 60px rgba(0, 0, 0, 0.45)",
-    display: "flex",
-    flexDirection: "column",
+    display: "flex", flexDirection: "column",
   },
   wrapperEmbedded: {
-    position: "fixed",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    width: "100%",
-    height: "100%",
-    maxWidth: "100%",
-    margin: 0,
-    borderRadius: 0,
-    boxShadow: "none",
+    width: "100%", height: "100%", maxWidth: "100%", margin: 0,
+    borderRadius: 0, boxShadow: "none",
   },
 
-  // ---------------- TOP HUD ----------------
-  topHud: {
-    position: "absolute",
-    top: 14,
-    left: 14,
-    right: 14,
-    zIndex: 20,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+  // ---------------- TOP ----------------
+  topScrim: {
+    position: "absolute", top: 0, left: 0, right: 0, height: 110, zIndex: 5,
+    background: "linear-gradient(to bottom, rgba(18,13,20,0.55), rgba(18,13,20,0))",
     pointerEvents: "none",
   },
-  topHudLeft: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    pointerEvents: "auto",
+  topHud: {
+    position: "absolute", top: 16, left: 16, right: 16, zIndex: 20,
+    display: "flex", alignItems: "center", justifyContent: "space-between",
+    pointerEvents: "none",
   },
-  closeGlassBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: "50%",
-    background: "rgba(18, 18, 24, 0.72)",
-    backdropFilter: "blur(12px)",
-    WebkitBackdropFilter: "blur(12px)",
-    border: "1px solid rgba(255, 255, 255, 0.16)",
-    color: "#ffffff",
-    fontSize: 13,
-    display: "grid",
-    placeItems: "center",
-    cursor: "pointer",
-    transition: "transform 0.15s ease",
-  },
-  productBadge: {
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
-    padding: "6px 12px",
-    borderRadius: 20,
-    background: "rgba(18, 18, 24, 0.72)",
-    backdropFilter: "blur(12px)",
-    WebkitBackdropFilter: "blur(12px)",
-    border: "1px solid rgba(255, 255, 255, 0.14)",
-    maxWidth: 160,
-  },
-  sparkleDot: {
-    fontSize: 12,
-  },
-  productBadgeText: {
-    fontSize: 11.5,
-    fontWeight: 650,
-    letterSpacing: 0.3,
-    color: "#ffffff",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-  },
-  hudStatusPill: {
-    display: "flex",
-    alignItems: "center",
-    gap: 7,
-    padding: "5px 11px",
-    borderRadius: 16,
-    background: "rgba(14, 14, 18, 0.8)",
-    backdropFilter: "blur(12px)",
-    WebkitBackdropFilter: "blur(12px)",
-    border: "1px solid rgba(255, 255, 255, 0.12)",
-    pointerEvents: "auto",
-  },
-  hudLiveIndicator: {
-    width: 7,
-    height: 7,
-    borderRadius: "50%",
-  },
-  hudStatusText: {
-    fontSize: 10.5,
-    fontWeight: 700,
-    letterSpacing: 0.4,
-    color: "#f3f4f6",
-  },
-  topHudRight: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    pointerEvents: "auto",
-  },
-  hudToolBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: "50%",
-    background: "rgba(18, 18, 24, 0.72)",
-    backdropFilter: "blur(12px)",
-    WebkitBackdropFilter: "blur(12px)",
-    border: "1px solid rgba(255, 255, 255, 0.16)",
-    color: "#ffffff",
-    display: "grid",
-    placeItems: "center",
-    cursor: "pointer",
-    transition: "background 0.15s ease, transform 0.15s ease",
-  },
-  hudToolBtnActive: {
-    background: "#D71940",
-    borderColor: "#D71940",
-    boxShadow: "0 0 10px rgba(215, 25, 64, 0.5)",
+  glassBtn: {
+    width: 40, height: 40, borderRadius: "50%", padding: 0,
+    background: GLASS, backdropFilter: BLUR, WebkitBackdropFilter: BLUR,
+    border: HAIRLINE, color: PEARL, display: "grid", placeItems: "center",
+    cursor: "pointer", pointerEvents: "auto",
+    transition: `transform .2s ${EASE}, background .2s ease`,
   },
 
-  // ---------------- CAMERA VIEWPORT ----------------
+  // ---------------- CAMERA ----------------
   cameraViewport: {
-    position: "relative",
-    width: "100%",
-    height: "70%",
-    flex: "0 0 70%",
-    minHeight: "70%",
-    maxHeight: "70%",
-    background: "#08080a",
-    overflow: "hidden",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    position: "absolute", inset: 0, width: "100%", height: "100%",
+    background: INK, overflow: "hidden",
+    display: "flex", alignItems: "center", justifyContent: "center",
   },
   hiddenVideo: {
-    position: "absolute",
-    inset: 0,
-    width: "100%",
-    height: "100%",
-    objectFit: "cover",
-    transform: "scaleX(-1)",
-    pointerEvents: "none",
-    opacity: 0,
+    position: "absolute", inset: 0, width: "100%", height: "100%",
+    objectFit: "cover", transform: "scaleX(-1)", pointerEvents: "none", opacity: 0,
   },
   cameraCanvas: {
-    position: "absolute",
-    inset: 0,
-    width: "100%",
-    height: "100%",
-    objectFit: "cover",
-    pointerEvents: "none",
+    position: "absolute", inset: 0, width: "100%", height: "100%",
+    objectFit: "cover", pointerEvents: "none",
   },
   capturedPhoto: {
-    position: "absolute",
-    inset: 0,
-    width: "100%",
-    height: "100%",
-    objectFit: "contain",
-    background: "#08080a",
+    position: "absolute", inset: 0, width: "100%", height: "100%",
+    objectFit: "contain", background: INK,
   },
   flashOverlay: {
-    position: "absolute",
-    inset: 0,
-    background: "#ffffff",
-    zIndex: 35,
-    animation: "studio-flash 0.28s ease-out forwards",
-    pointerEvents: "none",
+    position: "absolute", inset: 0, background: "#ffffff", zIndex: 35,
+    animation: "studio-flash 0.3s ease-out forwards", pointerEvents: "none",
   },
 
-  // ---------------- FLOATING TOOLBAR (RIGHT) ----------------
-  floatingToolbar: {
-    position: "absolute",
-    top: 64,
-    right: 14,
-    zIndex: 15,
-    display: "flex",
-    flexDirection: "column",
-    gap: 10,
+  // ---------------- RIGHT CONTROL RAIL ----------------
+  rail: {
+    position: "absolute", top: 72, right: 16, zIndex: 15,
+    display: "flex", flexDirection: "column", gap: 2, padding: 5,
+    borderRadius: 30, background: GLASS, border: HAIRLINE,
+    backdropFilter: BLUR, WebkitBackdropFilter: BLUR,
   },
-  sideToolButton: {
-    width: 38,
-    height: 38,
-    borderRadius: "50%",
-    border: "1px solid rgba(255, 255, 255, 0.16)",
-    background: "rgba(16, 16, 22, 0.72)",
-    backdropFilter: "blur(14px)",
-    WebkitBackdropFilter: "blur(14px)",
-    color: "#ffffff",
-    display: "grid",
-    placeItems: "center",
-    cursor: "pointer",
-    padding: 0,
-    boxShadow: "0 4px 12px rgba(0, 0, 0, 0.25)",
-    transition: "background 0.15s ease, transform 0.15s ease",
+  railBtn: {
+    width: 42, height: 42, borderRadius: "50%", padding: 0, border: "none",
+    background: "transparent", color: PEARL, display: "grid", placeItems: "center",
+    cursor: "pointer", transition: `background .35s ease, color .35s ease, transform .2s ${EASE}`,
   },
-  sideToolButtonActive: {
-    background: "#D71940",
-    borderColor: "#D71940",
-    boxShadow: "0 0 12px rgba(215, 25, 64, 0.6)",
-  },
+  railBtnOn: { background: "var(--accent)", color: "var(--accent-ink)" },
 
-  // ---------------- SHUTTER CONTAINER ----------------
-  shutterContainer: {
-    position: "absolute",
-    bottom: 18,
-    left: "50%",
-    transform: "translateX(-50%)",
-    zIndex: 15,
-  },
-  shutterButton: {
-    width: 58,
-    height: 58,
-    borderRadius: "50%",
-    background: "rgba(255, 255, 255, 0.22)",
-    backdropFilter: "blur(10px)",
-    WebkitBackdropFilter: "blur(10px)",
-    border: "2.5px solid rgba(255, 255, 255, 0.85)",
-    boxShadow: "0 6px 20px rgba(0, 0, 0, 0.4)",
-    display: "grid",
-    placeItems: "center",
-    cursor: "pointer",
-    padding: 0,
-    transition: "transform 0.12s ease",
-  },
-  shutterRing: {
-    width: 44,
-    height: 44,
-    borderRadius: "50%",
-    background: "#ffffff",
-    display: "grid",
-    placeItems: "center",
-  },
-  shutterCenter: {
-    width: 38,
-    height: 38,
-    borderRadius: "50%",
-    background: "radial-gradient(circle, #f9fafb 0%, #e5e7eb 100%)",
-  },
-  retakeLiveButton: {
-    padding: "8px 18px",
-    borderRadius: 24,
-    background: "rgba(20, 20, 26, 0.85)",
-    border: "1px solid rgba(255, 255, 255, 0.25)",
-    color: "#ffffff",
-    fontSize: 12,
-    fontWeight: 700,
-    letterSpacing: 0.3,
-    cursor: "pointer",
-    backdropFilter: "blur(12px)",
-    WebkitBackdropFilter: "blur(12px)",
-    boxShadow: "0 6px 16px rgba(0, 0, 0, 0.35)",
-  },
-
-  // ---------------- LOADING STATE OVERLAY ----------------
+  // ---------------- LOADING STATE ----------------
   loadingOverlay: {
-    position: "absolute",
-    inset: 0,
-    background: "rgba(9, 9, 12, 0.88)",
-    backdropFilter: "blur(16px)",
-    WebkitBackdropFilter: "blur(16px)",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 24,
-    textAlign: "center",
-    zIndex: 10,
+    position: "absolute", inset: 0, background: "rgba(18, 13, 20, 0.9)",
+    backdropFilter: "blur(18px)", WebkitBackdropFilter: "blur(18px)",
+    display: "flex", flexDirection: "column", alignItems: "center",
+    justifyContent: "center", padding: 28, textAlign: "center", zIndex: 10,
   },
   loadingPulseIcon: {
-    width: 54,
-    height: 54,
-    borderRadius: "50%",
-    background: "rgba(229, 192, 123, 0.12)",
-    border: "1px solid rgba(229, 192, 123, 0.3)",
-    display: "grid",
-    placeItems: "center",
-    marginBottom: 12,
-    animation: "studio-pulse 1.8s ease-in-out infinite",
+    width: 56, height: 56, borderRadius: "50%",
+    background: "rgba(246, 239, 233, 0.06)", border: HAIRLINE,
+    display: "grid", placeItems: "center", marginBottom: 14,
+    animation: "studio-pulse 2s ease-in-out infinite",
   },
   spinner: {
-    width: 36,
-    height: 36,
-    border: "3px solid rgba(255, 255, 255, 0.18)",
-    borderTopColor: "#e5c07b",
-    borderRadius: "50%",
-    animation: "studio-spin 0.8s linear infinite",
+    width: 28, height: 28, border: "2px solid rgba(246, 239, 233, 0.16)",
+    borderTopColor: PEARL, borderRadius: "50%", animation: "studio-spin 0.9s linear infinite",
   },
-  loadingText: {
-    marginTop: 14,
-    fontSize: 13,
-    color: "#f3f4f6",
-    maxWidth: 260,
-    lineHeight: 1.4,
-  },
+  loadingText: { marginTop: 16, fontSize: 14, color: PEARL, maxWidth: 260, lineHeight: 1.5 },
   primaryActionButton: {
-    padding: "9px 18px",
-    borderRadius: 10,
-    background: "#ffffff",
-    color: "#0a0a0c",
-    border: "none",
-    fontWeight: 700,
-    fontSize: 12.5,
-    cursor: "pointer",
-    boxShadow: "0 4px 14px rgba(255, 255, 255, 0.2)",
+    height: 46, padding: "0 22px", borderRadius: 23, border: "none",
+    background: PEARL, color: INK, fontWeight: 700, fontSize: 14, cursor: "pointer",
   },
   secondaryActionButton: {
-    padding: "9px 16px",
-    borderRadius: 10,
-    background: "rgba(255, 255, 255, 0.14)",
-    color: "#ffffff",
-    border: "1px solid rgba(255, 255, 255, 0.22)",
-    fontWeight: 650,
-    fontSize: 12.5,
-    cursor: "pointer",
+    height: 46, padding: "0 20px", borderRadius: 23, border: HAIRLINE,
+    background: "rgba(246, 239, 233, 0.08)", color: PEARL, fontWeight: 600,
+    fontSize: 14, cursor: "pointer",
   },
 
-  // ---------------- 30% BOTTOM DRAWER ----------------
-  bottomDrawer: {
-    position: "relative",
-    background: "linear-gradient(180deg, #131318 0%, #0c0c10 100%)",
-    width: "100%",
-    height: "30%",
-    flex: "0 0 30%",
-    minHeight: "30%",
-    maxHeight: "30%",
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "space-between",
-    padding: "8px 12px 10px",
-    boxSizing: "border-box",
-    overflow: "hidden",
-    borderTop: "1px solid rgba(255, 255, 255, 0.08)",
+  // ---------------- BOTTOM SHEET ----------------
+  sheet: {
+    position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 20,
+    padding: "84px 22px 24px",
+    display: "flex", flexDirection: "column", gap: 14,
+    background:
+      "linear-gradient(to top, rgba(18,13,20,0.96) 0%, rgba(18,13,20,0.86) 52%, rgba(18,13,20,0) 100%)",
+    animation: `sheet-rise .8s ${EASE} both`,
+  },
+  shadeHead: { display: "flex", flexDirection: "column", gap: 2, minWidth: 0 },
+  productLine: {
+    fontSize: 12.5, fontWeight: 500, color: MUTED, letterSpacing: 0.1,
+    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+  },
+  shadeName: {
+    fontFamily: '"Instrument Serif", "Cormorant Garamond", Georgia, serif',
+    fontSize: 32, lineHeight: 1.05, color: PEARL, letterSpacing: -0.2,
+    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+  },
+  swatchTrack: {
+    display: "flex", alignItems: "center", gap: 16, overflowX: "auto",
+    padding: "8px 14px", margin: "0 -14px",
+    WebkitMaskImage: "linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%)",
+    maskImage: "linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%)",
+  },
+  swatch: {
+    flexShrink: 0, width: 40, height: 40, borderRadius: "50%", border: "none",
+    padding: 0, cursor: "pointer", scrollSnapAlign: "center",
+    boxShadow: "inset 0 1px 2px rgba(255,255,255,0.4), inset 0 -7px 10px rgba(0,0,0,0.2)",
+  },
+  swatchOn: {
+    boxShadow:
+      `inset 0 1px 2px rgba(255,255,255,0.4), inset 0 -7px 10px rgba(0,0,0,0.2), 0 0 0 3px ${INK}, 0 0 0 4.5px ${PEARL}`,
+    transform: "scale(1.1)",
   },
 
-  // ---------------- TAB NAVIGATION PILLS ----------------
-  tabNav: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    overflowX: "auto",
-    paddingBottom: 4,
-    scrollbarWidth: "none",
-    flexShrink: 0,
+  // ---------------- ACTIONS ----------------
+  actions: {
+    display: "grid", gridTemplateColumns: "1fr auto 1fr",
+    alignItems: "center", paddingTop: 4,
   },
-  tabPill: {
-    background: "rgba(255, 255, 255, 0.06)",
-    border: "1px solid rgba(255, 255, 255, 0.09)",
-    borderRadius: 14,
-    padding: "4px 11px",
-    color: "#9ca3af",
-    fontSize: 11,
-    fontWeight: 700,
-    letterSpacing: 0.5,
-    cursor: "pointer",
-    whiteSpace: "nowrap",
-    transition: "all 0.15s ease",
+  sideAction: {
+    display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
+    background: "none", border: "none", color: PEARL, cursor: "pointer", padding: 0,
   },
-  tabPillActive: {
-    background: "rgba(215, 25, 64, 0.18)",
-    borderColor: "#D71940",
-    color: "#ffffff",
-    boxShadow: "0 0 10px rgba(215, 25, 64, 0.3)",
+  sideActionIcon: {
+    width: 48, height: 48, borderRadius: "50%", display: "grid", placeItems: "center",
+    background: GLASS, border: HAIRLINE, backdropFilter: BLUR, WebkitBackdropFilter: BLUR,
   },
-
-  // ---------------- TAB CONTENT BODY ----------------
-  tabPanelBody: {
-    flex: 1,
-    minHeight: 0,
-    display: "flex",
-    alignItems: "center",
-    overflow: "hidden",
+  sideActionLabel: { fontSize: 11.5, fontWeight: 500, color: MUTED },
+  shutter: {
+    width: 78, height: 78, borderRadius: "50%", padding: 5, background: "transparent",
+    border: "2px solid rgba(246, 239, 233, 0.92)", cursor: "pointer",
+    display: "grid", placeItems: "center",
+    transition: `transform .2s ${EASE}`,
   },
-  horizontalScrollTrack: {
-    display: "flex",
-    gap: 12,
-    overflowX: "auto",
-    padding: "4px 2px",
-    alignItems: "center",
-    width: "100%",
+  shutterCore: {
+    display: "block", width: "100%", height: "100%", borderRadius: "50%",
+    background: "var(--accent)",
+    boxShadow:
+      "inset 0 2px 6px rgba(255,255,255,0.35), inset 0 -10px 16px rgba(0,0,0,0.22), 0 8px 26px -6px var(--accent)",
+    transition: "background .4s ease, box-shadow .4s ease",
   },
-
-  // Shade Cards
-  shadeCard: {
-    flexShrink: 0,
-    width: 56,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: 5,
-    background: "none",
-    border: "none",
-    padding: "2px",
-    cursor: "pointer",
-    transition: "transform 0.15s ease",
+  actionsPhoto: { display: "flex", justifyContent: "center", gap: 12, paddingTop: 6 },
+  ghostPill: {
+    height: 50, padding: "0 22px", borderRadius: 25, border: HAIRLINE,
+    background: GLASS, backdropFilter: BLUR, WebkitBackdropFilter: BLUR,
+    color: PEARL, fontSize: 14, fontWeight: 600, cursor: "pointer",
+    display: "inline-flex", alignItems: "center", gap: 8,
   },
-  shadeCardSelected: {
-    transform: "scale(1.08)",
-  },
-  shadeCircleWrapper: {
-    position: "relative",
-    width: 36,
-    height: 36,
-    borderRadius: "50%",
-    padding: 2,
-    border: "2px solid transparent",
-  },
-  shadeCircle: {
-    width: "100%",
-    height: "100%",
-    borderRadius: "50%",
-    boxShadow: "inset 0 1px 3px rgba(255, 255, 255, 0.3), 0 3px 8px rgba(0, 0, 0, 0.4)",
-  },
-  shadeSelectedIndicator: {
-    position: "absolute",
-    inset: -3,
-    borderRadius: "50%",
-    border: "2px solid #ffffff",
-    boxShadow: "0 0 8px rgba(255, 255, 255, 0.8)",
-  },
-  shadeNameLabel: {
-    fontSize: 9.5,
-    fontWeight: 650,
-    color: "#d1d5db",
-    textAlign: "center",
-    width: "100%",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  },
-
-  // Finishes
-  finishesTrack: {
-    display: "flex",
-    gap: 8,
-    overflowX: "auto",
-    width: "100%",
-    padding: "2px",
-  },
-  finishCard: {
-    flex: "1 0 auto",
-    minWidth: 84,
-    padding: "6px 10px",
-    borderRadius: 12,
-    background: "rgba(255, 255, 255, 0.05)",
-    border: "1px solid rgba(255, 255, 255, 0.1)",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: 2,
-    cursor: "pointer",
-    transition: "all 0.15s ease",
-  },
-  finishCardSelected: {
-    background: "linear-gradient(135deg, rgba(215, 25, 64, 0.25) 0%, rgba(215, 25, 64, 0.08) 100%)",
-    borderColor: "#D71940",
-    boxShadow: "0 0 10px rgba(215, 25, 64, 0.25)",
-  },
-  finishTitle: {
-    fontSize: 11.5,
-    fontWeight: 700,
-    color: "#ffffff",
-  },
-  finishSubtitle: {
-    fontSize: 8.5,
-    color: "#9ca3af",
-    textAlign: "center",
-  },
-
-  // Intensity
-  intensityPanel: {
-    width: "100%",
-    padding: "4px 8px",
-    display: "flex",
-    flexDirection: "column",
-    gap: 6,
-  },
-  sliderHeaderRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  sliderLabel: {
-    fontSize: 11,
-    fontWeight: 600,
-    color: "#9ca3af",
-    letterSpacing: 0.3,
-  },
-  sliderValueBadge: {
-    fontSize: 11,
-    fontWeight: 700,
-    color: "#ffffff",
-    background: "rgba(255, 255, 255, 0.1)",
-    padding: "2px 8px",
-    borderRadius: 8,
-  },
-  sliderWrapper: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-  },
-  sliderMinMax: {
-    fontSize: 10,
-    fontWeight: 600,
-    color: "#6b7280",
-    textTransform: "uppercase",
-  },
-  intensitySlider: {
-    flex: 1,
-    height: 5,
-    accentColor: "#D71940",
-    cursor: "pointer",
-  },
-
-  // Product Catalog Cards
-  productCard: {
-    flexShrink: 0,
-    width: 68,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: 3,
-    background: "rgba(255, 255, 255, 0.04)",
-    border: "1px solid rgba(255, 255, 255, 0.08)",
-    borderRadius: 12,
-    padding: "5px 4px",
-    cursor: "pointer",
-  },
-  productCardSelected: {
-    borderColor: "#D71940",
-    background: "rgba(215, 25, 64, 0.15)",
-  },
-  productThumbWrap: {
-    width: 38,
-    height: 38,
-    borderRadius: 8,
-    overflow: "hidden",
-    background: "#181820",
-    display: "grid",
-    placeItems: "center",
-  },
-  productThumbImg: {
-    width: "100%",
-    height: "100%",
-    objectFit: "contain",
-  },
-  productThumbPlaceholder: {
-    fontSize: 18,
-  },
-  productCardTitle: {
-    fontSize: 9,
-    fontWeight: 600,
-    color: "#e5e7eb",
-    textAlign: "center",
-    width: "100%",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  },
-  productCardPrice: {
-    fontSize: 8.5,
-    color: "#9ca3af",
-  },
-
-  // Custom Color Panel
-  customColorPanel: {
-    width: "100%",
-    padding: "2px 4px",
-    display: "flex",
-    flexDirection: "column",
-    gap: 6,
-  },
-  customColorRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-  },
-  nativeColorInput: {
-    width: 34,
-    height: 30,
-    border: "1px solid rgba(255, 255, 255, 0.2)",
-    borderRadius: 8,
-    padding: 1,
-    cursor: "pointer",
-    background: "transparent",
-  },
-  hexTextInput: {
-    flex: 1,
-    height: 30,
-    border: "1px solid rgba(255, 255, 255, 0.15)",
-    borderRadius: 8,
-    padding: "0 10px",
-    fontFamily: "monospace",
-    fontSize: 12,
-    color: "#ffffff",
-    background: "rgba(255, 255, 255, 0.06)",
-  },
-  activeColorIndicator: {
-    width: 28,
-    height: 28,
-    borderRadius: "50%",
-    border: "2px solid #ffffff",
-    boxShadow: "0 2px 6px rgba(0, 0, 0, 0.3)",
-  },
-  quickSwatchesRow: {
-    display: "flex",
-    gap: 10,
-    alignItems: "center",
-  },
-  quickSwatchCircle: {
-    width: 22,
-    height: 22,
-    borderRadius: "50%",
-    border: "none",
-    cursor: "pointer",
-    padding: 0,
-    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.3)",
-  },
-
-  // ---------------- BOTTOM FOOTER ACTIONS ----------------
-  drawerFooter: {
-    display: "flex",
-    gap: 8,
-    width: "100%",
-    paddingTop: 6,
-    borderTop: "1px solid rgba(255, 255, 255, 0.06)",
-    flexShrink: 0,
-  },
-  luxuryButtonPrimary: {
-    flex: 1,
-    height: 34,
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 7,
-    borderRadius: 17,
-    border: "none",
-    background: "linear-gradient(135deg, #e6004c 0%, #b80f2e 100%)",
-    boxShadow: "0 3px 10px rgba(230, 0, 76, 0.35)",
-    color: "#ffffff",
-    fontSize: 12,
-    fontWeight: 700,
-    letterSpacing: 0.3,
-    cursor: "pointer",
-    transition: "transform 0.15s ease",
-  },
-  luxuryButtonSecondary: {
-    flex: 1,
-    height: 34,
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 7,
-    borderRadius: 17,
-    border: "1px solid rgba(255, 255, 255, 0.14)",
-    background: "rgba(255, 255, 255, 0.07)",
-    color: "#ffffff",
-    fontSize: 12,
-    fontWeight: 650,
-    letterSpacing: 0.3,
-    cursor: "pointer",
-    transition: "transform 0.15s ease",
+  solidPill: {
+    height: 50, padding: "0 26px", borderRadius: 25, border: "none",
+    fontSize: 14, fontWeight: 700, cursor: "pointer",
+    display: "inline-flex", alignItems: "center", gap: 8,
+    boxShadow: "0 10px 28px -8px var(--accent)",
+    transition: "background .4s ease, color .4s ease",
   },
 };
