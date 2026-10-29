@@ -388,7 +388,7 @@ function drawLipstickEnhanced(
   const rgbRaw = hexToRgb(color);
   // Tame over-saturated swatches so the result looks like a real stain
   const grayRaw = 0.2126 * rgbRaw.r + 0.7152 * rgbRaw.g + 0.0722 * rgbRaw.b;
-  const SAT = 0.65; // 1 = full swatch saturation, lower = more natural
+  const SAT = 0.80; // 1 = full swatch saturation, lower = more natural
   const rgb = {
     r: grayRaw + (rgbRaw.r - grayRaw) * SAT,
     g: grayRaw + (rgbRaw.g - grayRaw) * SAT,
@@ -522,7 +522,7 @@ function drawLipstickEnhanced(
 
   ctx.save();
   ctx.globalCompositeOperation = "source-over";
-  ctx.globalAlpha = Math.min(1, Math.max(0, intensity * 0.8));
+  ctx.globalAlpha = Math.min(1, Math.max(0, intensity * 0.9));
   ctx.drawImage(layerCanvas, bx, by);
   ctx.restore();
 }
@@ -1727,16 +1727,6 @@ const renderUploadedPhoto = useCallback(async (image) => {
               </button>
             )}
           </div>
-          <button
-            type="button"
-            onClick={toggleFullscreen}
-            title="Fullscreen"
-            aria-label="Toggle fullscreen"
-            className="vibe-press"
-            style={styles.glassBtn}
-          >
-            <Ico n="expand" />
-          </button>
         </header>
 
         {/* ------------------------------------------------------------- */}
@@ -1815,10 +1805,6 @@ const renderUploadedPhoto = useCallback(async (image) => {
 
           {/* Control rail: one quiet capsule instead of five floating discs */}
           <aside style={styles.rail} aria-label="Camera controls">
-            <button type="button" className="vibe-press" onClick={toggleFlipCamera}
-              title="Flip camera" aria-label="Flip camera" style={styles.railBtn}>
-              <Ico n="flip" />
-            </button>
             <button type="button" className="vibe-press" onClick={handleZoomToggle}
               title={`Zoom ${zoom.toFixed(1)}x`} aria-label="Change zoom"
               style={{ ...styles.railBtn, ...(zoom > 1.0 ? styles.railBtnOn : {}) }}>

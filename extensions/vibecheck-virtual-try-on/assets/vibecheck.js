@@ -1,4 +1,3 @@
-
 (function () {
   "use strict";
 
@@ -314,6 +313,9 @@
 
       previousFocus = document.activeElement;
       previousBodyOverflow = document.body.style.overflow;
+
+      // Mount on <body> so theme headers / transformed ancestors can't cover or clip it.
+      if (modal.parentElement !== document.body) document.body.appendChild(modal);
 
       modal.hidden = false;
       modal.classList.add("is-open");

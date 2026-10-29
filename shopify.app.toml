@@ -2,7 +2,7 @@
 
 client_id = "3323f53b53b4e0bcd53b0fbbe23da404"
 name = "Vibecheck"
-application_url = "https://example.com"
+application_url = "https://shopify-vibecheck.onrender.com"
 embedded = true
 
 [access_scopes]
