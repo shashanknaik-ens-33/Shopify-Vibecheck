@@ -1,35 +1,48 @@
+import StatCard from "../components/dashboard/StatCard";
+import BarChart from "../components/dashboard/BarChart";
+import "../styles/dashboard.css";
+
 export default function Analytics() {
-  const metrics = ["Try-on sessions", "Unique visitors", "Camera vs photo"];
-
   return (
-    <s-page heading="Analytics">
-      <s-section>
-        <s-grid
-          gridTemplateColumns="repeat(auto-fit, minmax(180px, 1fr))"
-          gap="base"
-        >
-          {metrics.map((label) => (
-            <s-grid-item key={label}>
-              <s-box padding="base" border="base" borderRadius="base">
-                <s-stack direction="block" gap="small">
-                  <s-text color="subdued">{label}</s-text>
-                  <s-heading>—</s-heading>
-                </s-stack>
-              </s-box>
-            </s-grid-item>
-          ))}
-        </s-grid>
-      </s-section>
+    <s-page heading="Analytics" inlineSize="large">
+      <div className="vc">
+        <header className="vc-header">
+          <div>
+            <h1 className="vc-title">Analytics</h1>
+            <p className="vc-subtitle">
+              See how customers use virtual try-on on your store.
+            </p>
+          </div>
+        </header>
 
-      <s-section heading="Top products">
-        <s-stack direction="block" gap="small">
-          <s-text type="strong">No try-on activity yet</s-text>
-          <s-text color="subdued">
-            Once customers start trying products on, you'll see sessions, top
-            products and category breakdowns here.
-          </s-text>
-        </s-stack>
-      </s-section>
+        <div className="vc-grid">
+          <StatCard index={0} hero title="Try-on sessions" value="—" />
+          <StatCard index={1} title="Unique visitors" value="—" />
+          <StatCard index={2} title="Camera sessions" value="—" />
+          <StatCard index={3} title="Photo uploads" value="—" />
+
+          <section className="vc-card vc-span-2" style={{ "--i": 4 }}>
+            <div className="vc-card__head">
+              <h2 className="vc-card__title">Try-ons this week</h2>
+            </div>
+            <BarChart
+              data={null}
+              emptyText="No try-on activity yet. Sessions will appear here once tracking is switched on."
+            />
+          </section>
+
+          <section className="vc-card vc-span-2" style={{ "--i": 5 }}>
+            <div className="vc-card__head">
+              <h2 className="vc-card__title">Top products</h2>
+            </div>
+            <div className="vc-empty">
+              <strong>No try-on activity yet</strong>
+              Once customers start trying products on, your most-tried products
+              will be listed here.
+            </div>
+          </section>
+        </div>
+      </div>
     </s-page>
   );
 }

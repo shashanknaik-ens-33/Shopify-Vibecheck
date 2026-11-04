@@ -1,4 +1,5 @@
 import { useState } from "react";
+import "../styles/dashboard.css";
 
 export default function Settings() {
   const [cameraEnabled, setCameraEnabled] = useState(true);
@@ -27,34 +28,44 @@ export default function Settings() {
   ];
 
   return (
-    <s-page heading="Settings">
-      <s-section heading="Customer experience">
-        <s-stack direction="block" gap="base">
-          {options.map((option, index) => (
-            <s-stack key={option.title} direction="block" gap="base">
-              {index > 0 ? <s-divider /> : null}
-              <s-stack direction="inline" gap="base" alignItems="center">
-                <s-stack direction="block" gap="small">
-                  <s-text type="strong">{option.title}</s-text>
-                  <s-text color="subdued">{option.description}</s-text>
-                </s-stack>
-                <s-spacer />
-                <s-switch
-                  checked={option.checked}
-                  onChange={(event) =>
-                    option.change(event.currentTarget.checked)
-                  }
-                />
-              </s-stack>
-            </s-stack>
-          ))}
-        </s-stack>
+    <s-page heading="Settings" inlineSize="large">
+      <div className="vc">
+        <header className="vc-header">
+          <div>
+            <h1 className="vc-title">Settings</h1>
+            <p className="vc-subtitle">
+              Control what your customers can do with try-on.
+            </p>
+          </div>
+        </header>
 
-        <s-banner tone="info">
-          These switches aren't saved yet and don't change your storefront.
-          Saving is the next step.
-        </s-banner>
-      </s-section>
+        <div className="vc-grid">
+          <section className="vc-card vc-span-2" style={{ "--i": 0 }}>
+            <div className="vc-card__head">
+              <h2 className="vc-card__title">Customer experience</h2>
+            </div>
+            {options.map((option) => (
+              <div className="vc-switch-row" key={option.title}>
+                <div className="vc-row__body">
+                  <div className="vc-row__title">{option.title}</div>
+                  <div className="vc-row__meta" style={{ whiteSpace: "normal" }}>
+                    {option.description}
+                  </div>
+                </div>
+                <s-switch
+                  label={option.title}
+                  checked={option.checked}
+                  onChange={(event) => option.change(event.currentTarget.checked)}
+                />
+              </div>
+            ))}
+            <p className="vc-note">
+              These switches aren't saved yet and don't change your storefront.
+              Saving is the next step.
+            </p>
+          </section>
+        </div>
+      </div>
     </s-page>
   );
 }
