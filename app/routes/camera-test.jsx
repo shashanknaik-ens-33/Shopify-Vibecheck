@@ -1,3 +1,4 @@
+import { trackTryOn } from "../utils/tryon-tracker";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import {
@@ -651,6 +652,13 @@ export default function CameraTest() {
     image: initialProductImage,
   });
 
+    useEffect(() => {
+    if (embedded) {
+      trackTryOn("tryon_opened", { id: initialProductId, title: initialProductTitle });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [catalog, setCatalog] = useState([]);
   const [productVariants, setProductVariants] = useState(parsedUrlVariants);
   const [activeVariantId, setActiveVariantId] = useState(
@@ -1035,6 +1043,7 @@ const initVisionTasks = useCallback(async () => {
         runningRef.current = true;
         startingRef.current = false;
         setCameraReady(true);
+        trackTryOn("camera_started");
         setStatus("Ready! Smooth tracking active.");
 
         // Initialize vision tasks in background without halting the camera
@@ -1562,6 +1571,7 @@ const renderUploadedPhoto = useCallback(async (image) => {
       return;
     }
     const objUrl = URL.createObjectURL(file);
+    trackTryOn("photo_uploaded");
     const img = new Image();
     uploadRequestRef.current += 1;
     uploadImageRef.current = img;
@@ -1586,6 +1596,7 @@ const renderUploadedPhoto = useCallback(async (image) => {
   };
 
   const selectVariant = (item) => {
+    trackTryOn("shade_selected", { id: currentProduct.id, title: currentProduct.title });
     setActiveVariantId(item.id);
     const effectiveHex = colorCacheRef.current[item.image] || item.hex;
     applyShade(effectiveHex);

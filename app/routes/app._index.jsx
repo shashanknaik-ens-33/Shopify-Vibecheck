@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Link,
   useLoaderData,
@@ -7,6 +7,8 @@ import {
 } from "react-router";
 import { authenticate } from "../shopify.server";
 import { classifyProduct } from "../utils/product-classifier.server";
+import { getRecentTryOnTimes } from "../utils/analytics.server";
+import { bucketLastSevenDays } from "../components/dashboard/chart-data";
 import StatCard from "../components/dashboard/StatCard";
 import StatusPill from "../components/dashboard/StatusPill";
 import BarChart from "../components/dashboard/BarChart";
@@ -50,6 +52,7 @@ const MAX_PAGES = 5; // up to 250 products
 export async function loader({ request }) {
   const { admin, session } = await authenticate.admin(request);
   const shop = session?.shop ?? "";
+  const recentTryOns = await getRecentTryOnTimes(shop);
 
   try {
     const nodes = [];
@@ -68,6 +71,7 @@ export async function loader({ request }) {
           products: [],
           truncated: false,
           shop,
+          recentTryOns,
           error: result.errors.map((item) => item.message).join("; "),
         };
       }
@@ -84,12 +88,13 @@ export async function loader({ request }) {
       ...classifyProduct(product),
     }));
 
-    return { products, truncated: hasNextPage, error: null, shop };
+    return { products, truncated: hasNextPage, error: null, shop, recentTryOns };
   } catch (error) {
     return {
       products: [],
       truncated: false,
       shop,
+      recentTryOns,
       error:
         error instanceof Error
           ? error.message
@@ -103,9 +108,15 @@ const FILTERS = ["all", "live", "prototype", "soon", "unsupported"];
 export default function Home() {
   const navigate = useNavigate();
   const revalidator = useRevalidator();
-  const { products, error, truncated, shop } = useLoaderData();
+  const { products, error, truncated, shop, recentTryOns } = useLoaderData();
+  const [week, setWeek] = useState(null);
   const [filter, setFilter] = useState("all");
   const productsRef = useRef(null);
+
+  // Day buckets use the viewer's own time zone, so compute them in the browser.
+  useEffect(() => {
+    setWeek(bucketLastSevenDays(recentTryOns));
+  }, [recentTryOns]);
 
   // Unchanged: reads the shade metafield so the try-on page can preview it.
   function getProductShade(product) {
@@ -258,15 +269,16 @@ export default function Home() {
 
             <section className="vc-card vc-span-2" style={{ "--i": 4 }}>
               <div className="vc-card__head">
-                <h2 className="vc-card__title">Try-ons this week</h2>
+                <h2 className="vc-card__title">Try-ons, last 7 days</h2>
                 <Link to="/app/analytics" className="vc-link">
                   View analytics
                 </Link>
               </div>
-              {/* Pass real numbers here (7 values, Sunday first) once event tracking exists. */}
               <BarChart
-                data={null}
-                emptyText="No try-on activity yet. Sessions will appear here once tracking is switched on."
+                data={week && recentTryOns.length > 0 ? week.counts : null}
+                labels={week ? week.labels : undefined}
+                loading={!week}
+                emptyText="No try-on activity yet. Sessions appear here once shoppers use try-on on your store."
               />
             </section>
 

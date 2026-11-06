@@ -2,15 +2,15 @@ const DAYS = ["S", "M", "T", "W", "T", "F", "S"];
 const PLACEHOLDER = [58, 82, 70, 96, 64, 76, 60];
 
 /**
- * data: null (no tracking yet → empty state) or an array of 7 numbers, Sunday first.
+ * data: null (empty state) or an array of 7 numbers; labels: 7 day letters, oldest first.
  */
-export default function BarChart({ data = null, emptyText }) {
+export default function BarChart({ data = null, labels = DAYS, loading = false, emptyText }) {
   const empty = !data;
   const max = empty ? 100 : Math.max(...data, 1);
 
   return (
     <div className={`vc-bars${empty ? " vc-bars--empty" : ""}`}>
-      {DAYS.map((day, index) => {
+      {labels.map((day, index) => {
         const value = empty ? PLACEHOLDER[index] : data[index];
         const pct = empty ? value : value === 0 ? 24 : Math.max((value / max) * 100, 24);
         let tone = "hatch";
@@ -28,7 +28,7 @@ export default function BarChart({ data = null, emptyText }) {
           </div>
         );
       })}
-      {empty ? (
+      {empty && !loading ? (
         <div className="vc-bars__empty">
           <span>{emptyText || "No try-on activity yet"}</span>
         </div>
