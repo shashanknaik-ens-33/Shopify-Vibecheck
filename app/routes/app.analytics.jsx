@@ -2,15 +2,22 @@ import { useEffect, useState } from "react";
 import { useLoaderData } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getAnalyticsSummary } from "../utils/analytics.server";
+import { getCustomerRows } from "../utils/customers.server";
 import StatCard from "../components/dashboard/StatCard";
 import BarChart from "../components/dashboard/BarChart";
 import DonutChart from "../components/dashboard/DonutChart";
+import CustomerTable, { formatMoney } from "../components/dashboard/CustomerTable";
 import { bucketLastSevenDays, timeAgo } from "../components/dashboard/chart-data";
 import "../styles/dashboard.css";
 
 export async function loader({ request }) {
   const { session } = await authenticate.admin(request);
-  return getAnalyticsSummary(session?.shop ?? "");
+  const shop = session?.shop ?? "";
+  const [summary, customers] = await Promise.all([
+    getAnalyticsSummary(shop),
+    getCustomerRows(shop),
+  ]);
+  return { ...summary, customers };
 }
 
 const EVENT_LABELS = {
@@ -19,18 +26,6 @@ const EVENT_LABELS = {
   photo_uploaded: "Uploaded a photo",
   shade_selected: "Tried a shade",
 };
-
-function formatMoney(amount, currency) {
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency: currency || "USD",
-      maximumFractionDigits: 0,
-    }).format(amount);
-  } catch {
-    return String(Math.round(amount));
-  }
-}
 
 const pct = (part, whole) => (whole ? Math.round((part / whole) * 100) : 0);
 
@@ -46,8 +41,11 @@ export default function Analytics() {
   }, [data.weekTimes]);
 
   const { sessions, visitors, cameraSessions, photoSessions, shadeSessions } = data;
+  const { rows, stats } = data.customers;
   const inputTotal = cameraSessions + photoSessions;
   const topMax = Math.max(...data.topProducts.map((item) => item.count), 1);
+  const checkoutTotal = stats.purchased + stats.abandoned;
+  const reachable = rows.filter((row) => row.status === "abandoned" && row.email).length;
 
   return (
     <s-page heading="Analytics" inlineSize="large">
@@ -56,8 +54,8 @@ export default function Analytics() {
           <div>
             <h1 className="vc-title">Analytics</h1>
             <p className="vc-subtitle">
-              How shoppers use virtual try-on on your storefront. Totals cover
-              the last 30 days.
+              How shoppers use virtual try-on on your storefront, and who bought or
+              left at checkout. Totals cover the last 30 days.
             </p>
           </div>
         </header>
@@ -68,24 +66,12 @@ export default function Analytics() {
           </div>
         ) : (
           <div className="vc-grid">
-            <StatCard
-              index={0}
-              hero
-              title="Try-on sessions"
-              value={sessions}
-              note="Last 30 days"
-            />
+            <StatCard index={0} hero title="Try-on sessions" value={sessions} note="Last 30 days" />
             <StatCard index={1} title="Unique visitors" value={visitors} note="Last 30 days" />
             <StatCard index={2} title="Camera sessions" value={cameraSessions} note="Last 30 days" />
             <StatCard index={3} title="Photo uploads" value={photoSessions} note="Last 30 days" />
 
-            <StatCard
-              index={4}
-              hero
-              title="Orders after try-on"
-              value={data.orders}
-              note="Last 30 days"
-            />
+            <StatCard index={4} hero title="Orders after try-on" value={data.orders} note="Last 30 days" />
             <StatCard
               index={5}
               title="Purchase rate"
@@ -105,7 +91,33 @@ export default function Analytics() {
               note="Orders with the tried product"
             />
 
-            <section className="vc-card vc-span-2" style={{ "--i": 8 }}>
+            <StatCard
+              index={8}
+              hero
+              title="Abandoned checkouts"
+              value={stats.abandoned}
+              note="Last 30 days"
+            />
+            <StatCard
+              index={9}
+              title="Abandoned value"
+              value={formatMoney(stats.abandonedValue, stats.currency)}
+              note="Could still be recovered"
+            />
+            <StatCard
+              index={10}
+              title="Checkout completion"
+              value={`${pct(stats.purchased, checkoutTotal)}%`}
+              note="Purchased vs abandoned"
+            />
+            <StatCard
+              index={11}
+              title="Reachable by email"
+              value={reachable}
+              note="Abandoned, latest 100"
+            />
+
+            <section className="vc-card vc-span-2" style={{ "--i": 12 }}>
               <div className="vc-card__head">
                 <h2 className="vc-card__title">Try-ons, last 7 days</h2>
               </div>
@@ -117,7 +129,7 @@ export default function Analytics() {
               />
             </section>
 
-            <section className="vc-card" style={{ "--i": 9 }}>
+            <section className="vc-card" style={{ "--i": 13 }}>
               <div className="vc-card__head">
                 <h2 className="vc-card__title">Engagement</h2>
               </div>
@@ -131,7 +143,7 @@ export default function Analytics() {
               />
             </section>
 
-            <section className="vc-card" style={{ "--i": 10 }}>
+            <section className="vc-card" style={{ "--i": 14 }}>
               <div className="vc-card__head">
                 <h2 className="vc-card__title">Camera or photo</h2>
               </div>
@@ -157,7 +169,7 @@ export default function Analytics() {
               )}
             </section>
 
-            <section className="vc-card vc-span-2" style={{ "--i": 11 }}>
+            <section className="vc-card vc-span-2" style={{ "--i": 15 }}>
               <div className="vc-card__head">
                 <h2 className="vc-card__title">Top products</h2>
               </div>
@@ -183,7 +195,7 @@ export default function Analytics() {
               )}
             </section>
 
-            <section className="vc-card vc-span-2" style={{ "--i": 12 }}>
+            <section className="vc-card vc-span-2" style={{ "--i": 16 }}>
               <div className="vc-card__head">
                 <h2 className="vc-card__title">Recent activity</h2>
               </div>
@@ -200,13 +212,15 @@ export default function Analytics() {
                         </div>
                         <div className="vc-row__meta">{item.title || "Product"}</div>
                       </div>
-                      <span className="vc-row__meta">
-                        {now ? timeAgo(item.at, now) : ""}
-                      </span>
+                      <span className="vc-row__meta">{now ? timeAgo(item.at, now) : ""}</span>
                     </li>
                   ))}
                 </ul>
               )}
+            </section>
+
+            <section className="vc-card vc-span-all" style={{ "--i": 17 }}>
+              <CustomerTable rows={rows} error={data.customers.error} />
             </section>
           </div>
         )}
