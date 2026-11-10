@@ -2,7 +2,7 @@ import prisma from "../db.server";
 
 const DAY = 24 * 60 * 60 * 1000;
 // A checkout with no activity for this long counts as abandoned.
-const ABANDON_AFTER_MS = 60 * 60 * 1000;
+const ABANDON_AFTER_MS = 60 * 1000;
 
 const idsOf = (value) => String(value || "").split(",").filter(Boolean);
 
