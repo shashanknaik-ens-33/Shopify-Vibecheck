@@ -59,3 +59,26 @@ model TryOnOrder {
   @@unique([shop, orderId])
   @@index([shop, createdAt])
 }
+
+// A checkout started by a shopper who used try-on. completedAt is set when it becomes an order.
+model TryOnCheckout {
+  id              String    @id @default(cuid())
+  shop            String
+  token           String
+  sessionIds      String
+  customerId      String?
+  customerName    String?
+  customerEmail   String?
+  customerCity    String?
+  customerCountry String?
+  itemSummary     String?
+  totalPrice      Float     @default(0)
+  currency        String?
+  recoveryUrl     String?
+  completedAt     DateTime?
+  startedAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([shop, token])
+  @@index([shop, updatedAt])
+}

@@ -9,6 +9,13 @@ export const action = async ({ request }) => {
   console.log(`Received ${topic} webhook for ${shop}`);
 
   try {
+        // This order finished a checkout, so it is no longer abandoned.
+    if (payload?.checkout_token) {
+      await db.tryOnCheckout.updateMany({
+        where: { shop, token: String(payload.checkout_token) },
+        data: { completedAt: new Date() },
+      });
+    }
     const attributes = Array.isArray(payload?.note_attributes)
       ? payload.note_attributes
       : [];
