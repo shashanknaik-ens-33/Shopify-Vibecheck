@@ -9,6 +9,7 @@ let sessionId = "";
 let currentProduct = {};
 let cachedShop;
 let announced = false;
+let listening = false;
 
 function uid() {
   try {
@@ -67,6 +68,25 @@ function detectShop() {
   return found;
 }
 
+function send(payload) {
+  const body = JSON.stringify(payload);
+
+  if (navigator.sendBeacon) {
+    const sent = navigator.sendBeacon(
+      ENDPOINT,
+      new Blob([body], { type: "application/json" })
+    );
+    if (sent) return;
+  }
+
+  fetch(ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+    keepalive: true,
+  }).catch(() => {});
+}
+
 export function trackTryOn(event, product) {
   if (typeof window === "undefined") return;
 
@@ -86,7 +106,7 @@ export function trackTryOn(event, product) {
       );
     }
 
-    const body = JSON.stringify({
+    send({
       event,
       shop,
       sessionId: getSessionId(),
@@ -94,22 +114,34 @@ export function trackTryOn(event, product) {
       productId: currentProduct.id ? String(currentProduct.id) : "",
       productTitle: currentProduct.title || "",
     });
-
-    if (navigator.sendBeacon) {
-      const sent = navigator.sendBeacon(
-        ENDPOINT,
-        new Blob([body], { type: "application/json" })
-      );
-      if (sent) return;
-    }
-
-    fetch(ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body,
-      keepalive: true,
-    }).catch(() => {});
   } catch {
     // Tracking must never break the try-on.
   }
+}
+
+// If the shopper is logged in to the store, the storefront page tells us who they are.
+if (typeof window !== "undefined" && !listening) {
+  listening = true;
+  window.addEventListener("message", (event) => {
+    try {
+      if (event.source !== window.parent) return;
+      const data = event.data;
+      if (!data || data.type !== "VIBECHECK_CUSTOMER" || !data.customerId) return;
+
+      const shop = detectShop();
+      if (!shop) return;
+
+      send({
+        event: "customer_identified",
+        shop,
+        sessionId: getSessionId(),
+        visitorId: getVisitorId(),
+        customerId: String(data.customerId).slice(0, 40),
+        customerName: String(data.customerName || "").slice(0, 120),
+        customerEmail: String(data.customerEmail || "").slice(0, 160),
+      });
+    } catch {
+      // Ignore anything unexpected.
+    }
+  });
 }

@@ -8,6 +8,7 @@ const EVENTS = new Set([
   "camera_started",
   "photo_uploaded",
   "shade_selected",
+  "customer_identified",
 ]);
 const SHOP_RE = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
 
@@ -59,15 +60,36 @@ export async function action({ request }) {
     SHOP_RE.test(shop) && EVENTS.has(event) && sessionId && visitorId;
 
   if (valid && withinLimit(shop) && (await isInstalled(shop))) {
-    const productId = clip(body?.productId, 80).split("/").pop() || null;
-    const productTitle = clip(body?.productTitle, 200) || null;
+    if (event === "customer_identified") {
+      // A logged-in store customer was using try-on: remember who this visitor is.
+      const customerId = clip(body?.customerId, 40).split("/").pop();
+      if (customerId) {
+        const fields = {
+          customerId,
+          customerName: clip(body?.customerName, 120) || null,
+          customerEmail: clip(body?.customerEmail, 160) || null,
+        };
+        try {
+          await prisma.tryOnVisitor.upsert({
+            where: { shop_visitorId: { shop, visitorId } },
+            create: { shop, visitorId, ...fields },
+            update: fields,
+          });
+        } catch (error) {
+          console.error("Vibecheck: could not save visitor", error);
+        }
+      }
+    } else {
+      const productId = clip(body?.productId, 80).split("/").pop() || null;
+      const productTitle = clip(body?.productTitle, 200) || null;
 
-    try {
-      await prisma.tryOnEvent.create({
-        data: { shop, event, sessionId, visitorId, productId, productTitle },
-      });
-    } catch (error) {
-      console.error("Vibecheck: could not save try-on event", error);
+      try {
+        await prisma.tryOnEvent.create({
+          data: { shop, event, sessionId, visitorId, productId, productTitle },
+        });
+      } catch (error) {
+        console.error("Vibecheck: could not save try-on event", error);
+      }
     }
   }
 

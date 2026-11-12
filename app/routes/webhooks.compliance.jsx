@@ -43,10 +43,23 @@ export const action = async ({ request }) => {
           data: { ...BLANK, recoveryUrl: null },
         });
       }
+      if (customerId || email) {
+        await db.tryOnVisitor.updateMany({
+          where: {
+            shop,
+            OR: [
+              ...(customerId ? [{ customerId }] : []),
+              ...(email ? [{ customerEmail: email }] : []),
+            ],
+          },
+          data: { customerId: null, customerName: null, customerEmail: null },
+        });
+      }
     } else if (kind === "shopredact") {
       await db.tryOnOrder.deleteMany({ where: { shop } });
       await db.tryOnCheckout.deleteMany({ where: { shop } });
       await db.tryOnEvent.deleteMany({ where: { shop } });
+      await db.tryOnVisitor.deleteMany({ where: { shop } });
       await db.session.deleteMany({ where: { shop } });
     }
     // customers/data_request: Vibecheck only holds what the order or checkout

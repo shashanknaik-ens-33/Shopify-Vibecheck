@@ -3,21 +3,24 @@ import { useLoaderData } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getAnalyticsSummary } from "../utils/analytics.server";
 import { getCustomerRows } from "../utils/customers.server";
+import { getSessionRows } from "../utils/sessions.server";
 import StatCard from "../components/dashboard/StatCard";
 import BarChart from "../components/dashboard/BarChart";
 import DonutChart from "../components/dashboard/DonutChart";
 import CustomerTable, { formatMoney } from "../components/dashboard/CustomerTable";
+import SessionTable from "../components/dashboard/SessionTable";
 import { bucketLastSevenDays, timeAgo } from "../components/dashboard/chart-data";
 import "../styles/dashboard.css";
 
 export async function loader({ request }) {
   const { session } = await authenticate.admin(request);
   const shop = session?.shop ?? "";
-  const [summary, customers] = await Promise.all([
+  const [summary, customers, sessionList] = await Promise.all([
     getAnalyticsSummary(shop),
     getCustomerRows(shop),
+    getSessionRows(shop),
   ]);
-  return { ...summary, customers };
+  return { ...summary, customers, sessionList };
 }
 
 const EVENT_LABELS = {
@@ -220,6 +223,10 @@ export default function Analytics() {
             </section>
 
             <section className="vc-card vc-span-all" style={{ "--i": 17 }}>
+              <SessionTable rows={data.sessionList.rows} error={data.sessionList.error} />
+            </section>
+
+            <section className="vc-card vc-span-all" style={{ "--i": 18 }}>
               <CustomerTable rows={rows} error={data.customers.error} />
             </section>
           </div>
