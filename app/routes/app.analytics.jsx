@@ -222,11 +222,11 @@ export default function Analytics() {
               )}
             </section>
 
-            <section className="vc-card vc-span-all" style={{ "--i": 17 }}>
+            <section className="vc-card vc-span-all" style={{ "--i": 17, gridColumn: "1 / -1" }}>
               <SessionTable rows={data.sessionList.rows} error={data.sessionList.error} />
             </section>
 
-            <section className="vc-card vc-span-all" style={{ "--i": 18 }}>
+            <section className="vc-card vc-span-all" style={{ "--i": 18, gridColumn: "1 / -1" }}>
               <CustomerTable rows={rows} error={data.customers.error} />
             </section>
           </div>

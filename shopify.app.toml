@@ -51,6 +51,18 @@ api_version = "2027-01"
   uri = "/webhooks/checkouts"
   topics = [ "checkouts/create", "checkouts/update" ]
 
+  [[webhooks.subscriptions]]
+     uri = "/webhooks/orders/create"
+     topics = [ "orders/create" ]
+
+  [[webhooks.subscriptions]]
+     uri = "/webhooks/checkouts"
+     topics = [ "checkouts/create", "checkouts/update" ]
+
+     [[webhooks.subscriptions]]
+     compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
+     uri = "/webhooks/compliance"
+
 [auth]
 redirect_urls = [
    "https://shopify-vibecheck.onrender.com/auth/callback"

@@ -715,29 +715,29 @@
         if (event.data.handle) {
           window.location.href = "/products/" + encodeURIComponent(event.data.handle);
         }
-            } else if (event.data.type === "VIBECHECK_CLOSE") {
-        closeModal();
-      } else if (event.data.type === "VIBECHECK_SESSION") {
-        if (!experienceFrame || event.source !== experienceFrame.contentWindow) return;
-        var sessionId = String(event.data.sessionId || "").slice(0, 64);
-        if (!sessionId) return;
-        fetch("/cart.js")
-          .then(function (response) { return response.json(); })
-          .then(function (cart) {
-            var existing = String((cart.attributes || {}).vibecheck_session || "")
-              .split(",")
-              .filter(Boolean);
-            if (existing.indexOf(sessionId) === -1) existing.push(sessionId);
-            return fetch("/cart/update.js", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                attributes: { vibecheck_session: existing.slice(-5).join(",") }
-              })
-            });
-          })
-          .catch(function () {});
-      }
+                     } else if (event.data.type === "VIBECHECK_CLOSE") {
+           closeModal();
+         } else if (event.data.type === "VIBECHECK_SESSION") {
+           if (!experienceFrame || event.source !== experienceFrame.contentWindow) return;
+           var sessionId = String(event.data.sessionId || "").slice(0, 64);
+           if (!sessionId) return;
+           fetch("/cart.js")
+             .then(function (response) { return response.json(); })
+             .then(function (cart) {
+               var existing = String((cart.attributes || {}).vibecheck_session || "")
+                 .split(",")
+                 .filter(Boolean);
+               if (existing.indexOf(sessionId) === -1) existing.push(sessionId);
+               return fetch("/cart/update.js", {
+                 method: "POST",
+                 headers: { "Content-Type": "application/json" },
+                 body: JSON.stringify({
+                   attributes: { vibecheck_session: existing.slice(-5).join(",") }
+                 })
+               });
+             })
+             .catch(function () {});
+         }
     });
 
     document.addEventListener("keydown", function (event) {
