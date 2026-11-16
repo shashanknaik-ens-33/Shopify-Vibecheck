@@ -6,7 +6,7 @@ application_url = "https://shopify-vibecheck.onrender.com"
 embedded = true
 
 [access_scopes]
-scopes = "read_products,write_products,read_orders,write_metaobjects,write_metaobject_definitions"
+scopes = "read_products,write_products,read_orders,read_customers,write_metaobjects,write_metaobject_definitions"
 
 [product.metafields.app.demo_info]
 type = "single_line_text_field"
@@ -33,35 +33,27 @@ name = "Description"
 type = "multi_line_text_field"
 
 [webhooks]
-api_version = "2027-01"
+api_version = "2026-10"
 
-  [[webhooks.subscriptions]]
-  uri = "/webhooks/app/uninstalled"
-  topics = [ "app/uninstalled" ]
+[[webhooks.subscriptions]]
+uri = "/webhooks/app/uninstalled"
+topics = ["app/uninstalled"]
 
-  [[webhooks.subscriptions]]
-  uri = "/webhooks/app/scopes_update"
-  topics = [ "app/scopes_update" ]
+[[webhooks.subscriptions]]
+uri = "/webhooks/app/scopes_update"
+topics = ["app/scopes_update"]
 
-    [[webhooks.subscriptions]]
-  uri = "/webhooks/orders/create"
-  topics = [ "orders/create" ]
+[[webhooks.subscriptions]]
+uri = "/webhooks/orders/create"
+topics = ["orders/create"]
 
-    [[webhooks.subscriptions]]
-  uri = "/webhooks/checkouts"
-  topics = [ "checkouts/create", "checkouts/update" ]
+[[webhooks.subscriptions]]
+uri = "/webhooks/checkouts"
+topics = ["checkouts/create", "checkouts/update"]
 
-  [[webhooks.subscriptions]]
-     uri = "/webhooks/orders/create"
-     topics = [ "orders/create" ]
-
-  [[webhooks.subscriptions]]
-     uri = "/webhooks/checkouts"
-     topics = [ "checkouts/create", "checkouts/update" ]
-
-     [[webhooks.subscriptions]]
-     compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
-     uri = "/webhooks/compliance"
+[[webhooks.subscriptions]]
+compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+uri = "/webhooks/compliance"
 
 [auth]
 redirect_urls = [
