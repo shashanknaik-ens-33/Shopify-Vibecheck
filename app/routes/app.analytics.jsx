@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLoaderData } from "react-router";
+import { useLoaderData, useRevalidator } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getAnalyticsSummary } from "../utils/analytics.server";
 import { getCustomerRows } from "../utils/customers.server";
@@ -34,8 +34,28 @@ const pct = (part, whole) => (whole ? Math.round((part / whole) * 100) : 0);
 
 export default function Analytics() {
   const data = useLoaderData();
+  const revalidator = useRevalidator();
   const [week, setWeek] = useState(null);
   const [now, setNow] = useState(null);
+
+  // Orders arrive through Shopify webhooks. Refresh the dashboard periodically
+  // while it is visible so new order details appear without a manual reload.
+  useEffect(() => {
+    const refreshIfVisible = () => {
+      if (
+        document.visibilityState === "visible" &&
+        revalidator.state === "idle"
+      ) {
+        revalidator.revalidate();
+      }
+    };
+    const timer = window.setInterval(refreshIfVisible, 5000);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+    };
+  }, [revalidator]);
 
   // Day buckets and "x min ago" depend on the viewer's clock, so they run in the browser.
   useEffect(() => {

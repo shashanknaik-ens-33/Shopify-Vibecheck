@@ -20,12 +20,25 @@ export const action = async ({ request }) => {
       ? payload.note_attributes
       : [];
     const raw = attributes.find((item) => item?.name === "vibecheck_session")?.value;
-
-    const sessionIds = String(raw || "")
+    let sessionIds = String(raw || "")
       .split(",")
       .map((id) => id.trim().slice(0, 64))
       .filter(Boolean)
       .slice(0, 5);
+
+    // Some order payloads omit cart attributes. The checkout webhook has
+    // already captured the try-on sessions, so use its token as a fallback.
+    if (!sessionIds.length && payload?.checkout_token) {
+      const checkout = await db.tryOnCheckout.findFirst({
+        where: { shop, token: String(payload.checkout_token) },
+        select: { sessionIds: true },
+      });
+      sessionIds = String(checkout?.sessionIds || "")
+        .split(",")
+        .map((id) => id.trim().slice(0, 64))
+        .filter(Boolean)
+        .slice(0, 5);
+    }
 
     if (sessionIds.length) {
       // Only count sessions we actually recorded for this shop.
