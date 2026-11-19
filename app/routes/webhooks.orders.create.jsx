@@ -40,6 +40,38 @@ export const action = async ({ request }) => {
         .slice(0, 5);
     }
 
+    // Accelerated checkout can omit cart attributes. Product form properties
+    // carry the session through that path when the shopper bought a product
+    // after opening try-on.
+    if (!sessionIds.length) {
+      const propertyValues = (payload?.line_items ?? []).flatMap((item) => {
+        if (Array.isArray(item?.properties)) {
+          return item.properties
+            .filter((property) => property?.name === "_vibecheck_session")
+            .map((property) => property.value);
+        }
+        const value = item?.properties?._vibecheck_session;
+        return value ? [value] : [];
+      });
+      sessionIds = propertyValues
+        .flatMap((value) => String(value || "").split(","))
+        .map((id) => id.trim().slice(0, 64))
+        .filter(Boolean)
+        .slice(0, 5);
+    }
+
+    if (!sessionIds.length && payload?.cart_token) {
+      const checkout = await db.tryOnCheckout.findFirst({
+        where: { shop, cartToken: String(payload.cart_token) },
+        select: { sessionIds: true },
+      });
+      sessionIds = String(checkout?.sessionIds || "")
+        .split(",")
+        .map((id) => id.trim().slice(0, 64))
+        .filter(Boolean)
+        .slice(0, 5);
+    }
+
     if (sessionIds.length) {
       // Only count sessions we actually recorded for this shop.
       const known = await db.tryOnEvent.findMany({
@@ -94,8 +126,8 @@ export const action = async ({ request }) => {
       }
     }
   } catch (error) {
-    // Always answer 200 so Shopify doesn't keep retrying a bad payload.
     console.error("Vibecheck: could not record try-on order", error);
+    return new Response(null, { status: 500 });
   }
 
   return new Response();

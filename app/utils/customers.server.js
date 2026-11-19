@@ -20,16 +20,16 @@ export async function getCustomerRows(shop) {
     const since = new Date(now - 30 * DAY);
     const cutoff = new Date(now - ABANDON_AFTER_MS);
 
-    const [orders, checkouts, purchased, abandoned] = await Promise.all([
+    const [orders, checkouts, orderCount, abandoned] = await Promise.all([
       prisma.tryOnOrder.findMany({
-        where: { shop },
+        where: { shop, createdAt: { gte: since } },
         orderBy: { createdAt: "desc" },
-        take: 100,
+        take: 5000,
       }),
       prisma.tryOnCheckout.findMany({
-        where: { shop, completedAt: null },
+        where: { shop, updatedAt: { gte: since } },
         orderBy: { updatedAt: "desc" },
-        take: 100,
+        take: 5000,
       }),
       prisma.tryOnOrder.count({ where: { shop, createdAt: { gte: since } } }),
       prisma.tryOnCheckout.aggregate({
@@ -106,7 +106,11 @@ export async function getCustomerRows(shop) {
 
     const checkoutRows = checkouts.map((row) => ({
       id: `c-${row.id}`,
-      status: row.updatedAt < cutoff ? "abandoned" : "checkout",
+      status: row.completedAt
+        ? "purchased"
+        : row.updatedAt < cutoff
+          ? "abandoned"
+          : "checkout",
       orderName: "",
       name: row.customerName || "",
       email: row.customerEmail || "",
@@ -120,12 +124,30 @@ export async function getCustomerRows(shop) {
       at: row.updatedAt.toISOString(),
     }));
 
-    const rows = [...orderRows, ...checkoutRows].sort((a, b) => (a.at < b.at ? 1 : -1));
+    const orderSessions = new Set(orders.flatMap((row) => idsOf(row.sessionIds)));
+    const accountedSessions = new Set(orderSessions);
+    const unmatchedCompletedCheckouts = [];
+    for (const row of checkouts) {
+      if (!row.completedAt) continue;
+      const sessionIds = idsOf(row.sessionIds);
+      if (sessionIds.some((sessionId) => accountedSessions.has(sessionId))) continue;
+      unmatchedCompletedCheckouts.push(row);
+      sessionIds.forEach((sessionId) => accountedSessions.add(sessionId));
+    }
+    const fallbackOrderRows = unmatchedCompletedCheckouts.map((row) => ({
+      ...checkoutRows.find((entry) => entry.id === `c-${row.id}`),
+      orderName: "Order placed",
+    }));
+    const visibleOrderRows = orderRows.slice(0, 100);
+    const visibleCheckoutRows = checkoutRows.filter((row) => row.status !== "purchased");
+    const rows = [...visibleOrderRows, ...fallbackOrderRows, ...visibleCheckoutRows]
+      .sort((a, b) => (a.at < b.at ? 1 : -1))
+      .slice(0, 100);
 
     return {
       rows,
       stats: {
-        purchased,
+        purchased: orderCount + unmatchedCompletedCheckouts.length,
         abandoned: abandoned._count._all,
         abandonedValue: abandoned._sum.totalPrice ?? 0,
         currency: orders[0]?.currency ?? checkouts[0]?.currency ?? null,

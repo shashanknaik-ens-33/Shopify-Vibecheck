@@ -43,6 +43,7 @@ export const action = async ({ request }) => {
         const data = {
           shop,
           token,
+          cartToken: clip(payload.cart_token, 100),
           sessionIds: [...new Set(known.map((row) => row.sessionId))].join(","),
           customerId: clip(customer.id, 40),
           customerName: clip(fullName, 120),
@@ -71,8 +72,8 @@ export const action = async ({ request }) => {
       }
     }
   } catch (error) {
-    // Always answer 200 so Shopify doesn't keep retrying a bad payload.
     console.error("Vibecheck: could not record checkout", error);
+    return new Response(null, { status: 500 });
   }
 
   return new Response();

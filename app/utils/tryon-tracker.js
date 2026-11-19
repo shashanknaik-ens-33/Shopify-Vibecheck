@@ -126,7 +126,13 @@ if (typeof window !== "undefined" && !listening) {
     try {
       if (event.source !== window.parent) return;
       const data = event.data;
-      if (!data || data.type !== "VIBECHECK_CUSTOMER" || !data.customerId) return;
+      const customer =
+        data?.type === "VIBECHECK_CUSTOMER"
+          ? data
+          : data?.type === "VIBECHECK_DATA"
+            ? data.customer
+            : null;
+      if (!customer?.id && !customer?.customerId) return;
 
       const shop = detectShop();
       if (!shop) return;
@@ -136,9 +142,12 @@ if (typeof window !== "undefined" && !listening) {
         shop,
         sessionId: getSessionId(),
         visitorId: getVisitorId(),
-        customerId: String(data.customerId).slice(0, 40),
-        customerName: String(data.customerName || "").slice(0, 120),
-        customerEmail: String(data.customerEmail || "").slice(0, 160),
+        customerId: String(customer.id || customer.customerId).slice(0, 40),
+        customerName: String(
+          customer.customerName ||
+            [customer.firstName, customer.lastName].filter(Boolean).join(" ")
+        ).slice(0, 120),
+        customerEmail: String(customer.email || customer.customerEmail || "").slice(0, 160),
       });
     } catch {
       // Ignore anything unexpected.

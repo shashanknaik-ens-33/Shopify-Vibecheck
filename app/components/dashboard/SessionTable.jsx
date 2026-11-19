@@ -23,12 +23,12 @@ function csvCell(value) {
 function downloadCsv(rows, name) {
   const header = [
     "Date", "Visitor", "Customer", "Email", "Location",
-    "Tried on", "How", "Outcome", "Total", "Currency", "Order",
+    "Tried on", "Purchased", "How", "Outcome", "Total", "Currency", "Order",
   ];
   const lines = rows.map((row) =>
     [
       row.at, row.visitor, row.name, row.email, row.place,
-      row.tried.join("; "), row.method, OUTCOMES[row.outcome].label,
+      row.tried.join("; "), row.items, row.method, OUTCOMES[row.outcome].label,
       row.total, row.currency || "", row.orderName,
     ]
       .map(csvCell)
@@ -125,6 +125,7 @@ export default function SessionTable({ rows, error }) {
                     <th>When</th>
                     <th>Customer</th>
                     <th>Tried on</th>
+                    <th>Purchased</th>
                     <th>Outcome</th>
                     <th className="vc-num">Total</th>
                   </tr>
@@ -163,6 +164,7 @@ export default function SessionTable({ rows, error }) {
                             {row.shade ? " · tried a shade" : ""}
                           </div>
                         </td>
+                        <td>{row.items || "—"}</td>
                         <td>
                           <span className={`vc-pill vc-pill--${outcome.tone}`}>{outcome.label}</span>
                           {row.orderName ? <div className="vc-cell-sub">{row.orderName}</div> : null}

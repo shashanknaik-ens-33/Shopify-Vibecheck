@@ -71,6 +71,7 @@ model TryOnCheckout {
   id              String    @id @default(cuid())
   shop            String
   token           String
+  cartToken       String?
   sessionIds      String
   customerId      String?
   customerName    String?
@@ -87,6 +88,7 @@ model TryOnCheckout {
 
   @@unique([shop, token])
   @@index([shop, updatedAt])
+  @@index([shop, cartToken])
 }
 
 // A shopper we could identify because they were logged in to the store while trying on.

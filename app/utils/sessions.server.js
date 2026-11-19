@@ -32,7 +32,8 @@ export async function getSessionRows(shop) {
         take: 300,
       }),
       prisma.tryOnCheckout.findMany({
-        where: { shop, completedAt: null, updatedAt: { gte: since } },
+        where: { shop, updatedAt: { gte: since } },
+        orderBy: { updatedAt: "desc" },
         take: 300,
       }),
     ]);
@@ -78,7 +79,9 @@ export async function getSessionRows(shop) {
     }
     const checkoutBySession = new Map();
     for (const checkout of checkouts) {
-      idsOf(checkout.sessionIds).forEach((id) => checkoutBySession.set(id, checkout));
+      idsOf(checkout.sessionIds).forEach((id) => {
+        if (!checkoutBySession.has(id)) checkoutBySession.set(id, checkout);
+      });
     }
 
     const rows = list.map((entry) => {
@@ -92,7 +95,11 @@ export async function getSessionRows(shop) {
         outcome = "purchased";
         source = order;
       } else if (checkout) {
-        outcome = checkout.updatedAt.getTime() < cutoff ? "abandoned" : "checkout";
+        outcome = checkout.completedAt
+          ? "purchased"
+          : checkout.updatedAt.getTime() < cutoff
+            ? "abandoned"
+            : "checkout";
         source = checkout;
       }
 
@@ -129,7 +136,8 @@ export async function getSessionRows(shop) {
           : "",
         total: source ? source.totalPrice : 0,
         currency: source?.currency ?? null,
-        orderName: order?.orderName || "",
+        orderName: order?.orderName || (checkout?.completedAt ? "Order placed" : ""),
+        items: order?.itemSummary || checkout?.itemSummary || "",
       };
     });
 

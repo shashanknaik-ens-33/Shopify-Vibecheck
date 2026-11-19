@@ -57,6 +57,21 @@
     let previousBodyOverflow = "";
     let previousFocus = null;
     let photoSource = null;
+    let tryOnSessionIds = [];
+
+    function attachTryOnSessionToProductForms() {
+      if (!tryOnSessionIds.length) return;
+      document.querySelectorAll('form[action*="/cart/add"]').forEach(function (form) {
+        let field = form.querySelector('input[name="properties[_vibecheck_session]"]');
+        if (!field) {
+          field = document.createElement("input");
+          field.type = "hidden";
+          field.name = "properties[_vibecheck_session]";
+          form.appendChild(field);
+        }
+        field.value = tryOnSessionIds.join(",");
+      });
+    }
 
     try {
       shopifyProduct = productJsonElement
@@ -436,6 +451,12 @@
         experienceFrame.contentWindow.postMessage(
           {
             type: "VIBECHECK_DATA",
+            customer: {
+              id: root.dataset.customerId || "",
+              firstName: root.dataset.customerFirstName || "",
+              lastName: root.dataset.customerLastName || "",
+              email: root.dataset.customerEmail || ""
+            },
             product: {
               ...product,
               variants: shopifyProduct?.variants || []
@@ -721,6 +742,9 @@
         if (!experienceFrame || event.source !== experienceFrame.contentWindow) return;
         var sessionId = String(event.data.sessionId || "").slice(0, 64);
         if (!sessionId) return;
+        if (tryOnSessionIds.indexOf(sessionId) === -1) tryOnSessionIds.push(sessionId);
+        tryOnSessionIds = tryOnSessionIds.slice(-5);
+        attachTryOnSessionToProductForms();
         fetch("/cart.js")
           .then(function (response) { return response.json(); })
           .then(function (cart) {
