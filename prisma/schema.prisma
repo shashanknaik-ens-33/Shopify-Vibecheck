@@ -50,6 +50,12 @@ model TryOnOrder {
   shop            String
   orderId         String
   orderName       String?
+  customerId      String?
+  customerName    String?
+  customerEmail   String?
+  customerCity    String?
+  customerCountry String?
+  itemSummary     String?
   totalPrice      Float    @default(0)
   currency        String?
   sessionIds      String

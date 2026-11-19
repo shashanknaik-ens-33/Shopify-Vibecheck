@@ -44,11 +44,29 @@ export const action = async ({ request }) => {
           String(item.product_id)
         );
         const boughtTriedItem = boughtProducts.some((id) => triedProducts.has(id));
+        const customer = payload.customer ?? {};
+        const address =
+          payload.shipping_address ?? payload.billing_address ?? customer.default_address ?? {};
+        const customerName =
+          [customer.first_name, customer.last_name].filter(Boolean).join(" ") ||
+          [address.first_name, address.last_name].filter(Boolean).join(" ") ||
+          null;
 
         const data = {
           shop,
           orderId: String(payload.id),
           orderName: payload.name ? String(payload.name) : null,
+          customerId: customer.id ? String(customer.id) : null,
+          customerName,
+          customerEmail: payload.email || customer.email || null,
+          customerCity: address.city ? String(address.city) : null,
+          customerCountry: address.country ? String(address.country) : null,
+          itemSummary:
+            (payload.line_items ?? [])
+              .map((item) => item.title)
+              .filter(Boolean)
+              .join(", ")
+              .slice(0, 300) || null,
           totalPrice: Number.parseFloat(payload.total_price) || 0,
           currency: payload.currency ? String(payload.currency) : null,
           sessionIds: [...new Set(known.map((row) => row.sessionId))].join(","),
