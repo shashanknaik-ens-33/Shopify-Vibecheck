@@ -1,103 +1,100 @@
-
-import { useState } from "react";
-import { useLoaderData, useNavigate } from "react-router";
+import { useEffect, useRef, useState } from "react";
+import {
+  Link,
+  useLoaderData,
+  useNavigate,
+  useRevalidator,
+} from "react-router";
 import { authenticate } from "../shopify.server";
+import { classifyProduct } from "../utils/product-classifier.server";
+import { getRecentTryOnTimes } from "../utils/analytics.server";
+import { bucketLastSevenDays } from "../components/dashboard/chart-data";
+import StatCard from "../components/dashboard/StatCard";
+import StatusPill from "../components/dashboard/StatusPill";
+import BarChart from "../components/dashboard/BarChart";
+import DonutChart from "../components/dashboard/DonutChart";
+import { Camera, Plus, Refresh } from "../components/dashboard/Icons";
+import { CATEGORIES, STATUS, statusKeyFor } from "../components/dashboard/status";
+import "../styles/dashboard.css";
 
-export async function loader({ request }) {
-  const { admin } = await authenticate.admin(request);
-
-  try {
-    const response = await admin.graphql(`
-      query VibecheckProducts {
-        products(first: 50, sortKey: TITLE) {
+const PRODUCTS_QUERY = `#graphql
+  query VibecheckProducts($cursor: String) {
+    products(first: 50, sortKey: TITLE, after: $cursor) {
+      nodes {
+        id
+        title
+        handle
+        productType
+        tags
+        status
+        featuredImage {
+          url
+          altText
+        }
+        metafields(first: 20) {
           nodes {
-            id
-            title
-            handle
-            productType
-            tags
-            status
-            featuredImage {
-              url
-              altText
-            }
-            metafields(first: 20) {
-              nodes {
-                namespace
-                key
-                value
-              }
-            }
+            namespace
+            key
+            value
           }
         }
       }
-    `);
-
-    const result = await response.json();
-
-    if (result.errors?.length) {
-      return {
-        products: [],
-        error: result.errors.map((item) => item.message).join("; "),
-      };
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
     }
+  }
+`;
 
-    const products = (result.data?.products?.nodes ?? []).map(
-      (product) => {
-        const normalize = (value) =>
-          String(value ?? "")
-            .toLowerCase()
-            .replace(/[_-]+/g, " ")
-            .replace(/\s+/g, " ")
-            .trim();
+const MAX_PAGES = 5; // up to 250 products
 
-        const title = normalize(product.title);
-        const productType = normalize(product.productType);
-        const tags = (product.tags ?? []).map(normalize);
-        const searchableText = [title, productType, ...tags].join(" ");
+export async function loader({ request }) {
+  const { admin, session } = await authenticate.admin(request);
+  const shop = session?.shop ?? "";
+  const recentTryOns = await getRecentTryOnTimes(shop);
 
-        let category = "Unsupported";
-        let effectReady = false;
+  try {
+    const nodes = [];
+    let cursor = null;
+    let hasNextPage = true;
+    let page = 0;
 
-        if (
-          /\b(lipsticks?|lip gloss(?:es)?|lipgloss(?:es)?|lip tints?|lip stains?|lip colors?|lip colours?)\b/.test(
-            searchableText
-          )
-        ) {
-          category = "Lipstick";
-        } else if (
-          /\b(headbands?|hair bands?|alice bands?|head wraps?)\b/.test(
-            searchableText
-          )
-        ) {
-          category = "Headbands";
-        } else if (
-          /\b(glasses|eyeglasses|sunglasses|spectacles|eyewear|optical frames?|reading glasses)\b/.test(
-            searchableText
-          )
-        ) {
-          category = "Glasses";
-          effectReady = true;
-        } else if (
-          /\b(t shirts?|tshirts?|tees|shirts?|tops|blouses|dresses|hoodies|sweatshirts|jackets|coats|sweaters|jeans|trousers|pants|shorts|skirts|leggings|jumpsuits|rompers|cardigans)\b/.test(
-            searchableText
-          )
-        ) {
-          category = "Clothing";
-        }
+    while (hasNextPage && page < MAX_PAGES) {
+      const response = await admin.graphql(PRODUCTS_QUERY, {
+        variables: { cursor },
+      });
+      const result = await response.json();
 
+      if (result.errors?.length) {
         return {
-          ...product,
-          category,
-          effectReady,
+          products: [],
+          truncated: false,
+          shop,
+          recentTryOns,
+          error: result.errors.map((item) => item.message).join("; "),
         };
       }
-    );
 
-    return { products, error: null };
+      const connection = result.data?.products;
+      nodes.push(...(connection?.nodes ?? []));
+      hasNextPage = Boolean(connection?.pageInfo?.hasNextPage);
+      cursor = connection?.pageInfo?.endCursor ?? null;
+      page += 1;
+    }
+
+    const products = nodes.map((product) => ({
+      ...product,
+      ...classifyProduct(product),
+    }));
+
+    return { products, truncated: hasNextPage, error: null, shop, recentTryOns };
   } catch (error) {
     return {
       products: [],
+      truncated: false,
+      shop,
+      recentTryOns,
       error:
         error instanceof Error
           ? error.message
@@ -106,15 +103,22 @@ export async function loader({ request }) {
   }
 }
 
-export default function Index() {
+const FILTERS = ["all", "live", "prototype", "soon", "unsupported"];
+
+export default function Home() {
   const navigate = useNavigate();
-  const { products, error } = useLoaderData();
+  const revalidator = useRevalidator();
+  const { products, error, truncated, shop, recentTryOns } = useLoaderData();
+  const [week, setWeek] = useState(null);
+  const [filter, setFilter] = useState("all");
+  const productsRef = useRef(null);
 
-  const [cameraEnabled, setCameraEnabled] = useState(true);
-  const [uploadEnabled, setUploadEnabled] = useState(true);
-  const [autoDetect, setAutoDetect] = useState(true);
-  const [filter, setFilter] = useState("All");
+  // Day buckets use the viewer's own time zone, so compute them in the browser.
+  useEffect(() => {
+    setWeek(bucketLastSevenDays(recentTryOns));
+  }, [recentTryOns]);
 
+  // Unchanged: reads the shade metafield so the try-on page can preview it.
   function getProductShade(product) {
     const metafields = product.metafields?.nodes ?? [];
 
@@ -132,28 +136,22 @@ export default function Index() {
     );
 
     const preferred = usable.find((field) =>
-      preferredKeys.includes(
-        `${field.namespace}.${field.key}`.toLowerCase()
-      )
+      preferredKeys.includes(`${field.namespace}.${field.key}`.toLowerCase())
     );
 
     if (preferred) return String(preferred.value).trim();
 
     const fallback = usable.find((field) => {
       const key = `${field.namespace}.${field.key}`.toLowerCase();
-
-      return (
-        /shade|lipstick_color|lipstick_colour|lip_color|lip_colour/.test(
-          key
-        )
-      );
+      return /shade|lipstick_color|lipstick_colour|lip_color|lip_colour/.test(key);
     });
 
     return fallback ? String(fallback.value).trim() : "";
   }
 
+  // Unchanged: opens the working try-on page for a product.
   function openTryOn(product) {
-    if (!autoDetect || product.category === "Unsupported") return;
+    if (product.category === "Unsupported") return;
 
     const params = new URLSearchParams({
       id: product.id,
@@ -171,320 +169,284 @@ export default function Index() {
     );
   }
 
-  const filteredProducts = products.filter((product) => {
-    if (!autoDetect) {
-      return filter === "All" || filter === "Unsupported";
-    }
+  const items = products.map((product) => ({
+    ...product,
+    status: statusKeyFor(product.category),
+  }));
 
-    return filter === "All" || product.category === filter;
-  });
+  const countStatus = (key) => items.filter((item) => item.status === key).length;
+  const total = items.length;
+  const live = countStatus("live");
+  const prototype = countStatus("prototype");
+  const soon = countStatus("soon");
+  const unsupported = countStatus("unsupported");
+  const matched = total - unsupported;
+  const livePct = total ? Math.round((live / total) * 100) : 0;
 
-  const detectedCount = autoDetect
-    ? products.filter((product) => product.category !== "Unsupported").length
-    : 0;
+  const visible = items.filter((item) => filter === "all" || item.status === filter);
 
-  const unsupportedCount = autoDetect
-    ? products.filter((product) => product.category === "Unsupported").length
-    : products.length;
+  const shopName = shop ? shop.replace(".myshopify.com", "") : "your store";
+  const themeEditorUrl = shop
+    ? `https://admin.shopify.com/store/${shopName}/themes/current/editor?context=apps`
+    : null;
 
-  const categories = [
-    {
-      icon: "👓",
-      name: "Glasses",
-      description: "Live face tracking and glasses overlay",
-      status: "Prototype working",
-    },
-    {
-      icon: "💄",
-      name: "Lipstick",
-      description: "Lip tracking and shade preview",
-      status: "Effect in development",
-    },
-    {
-      icon: "🎀",
-      name: "Headbands",
-      description: "Forehead tracking and accessory overlay",
-      status: "Effect in development",
-    },
-    {
-      icon: "👕",
-      name: "Clothing",
-      description: "Clothing preview and garment overlay",
-      status: "Effect in development",
-    },
-  ];
+  function showStatus(key) {
+    setFilter(key);
+    productsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
-  const settings = [
-    {
-      title: "Live camera",
-      description: "Allow customers to use their camera.",
-      checked: cameraEnabled,
-      change: setCameraEnabled,
-    },
-    {
-      title: "Upload photo",
-      description: "Allow customers to upload a photo.",
-      checked: uploadEnabled,
-      change: setUploadEnabled,
-    },
-    {
-      title: "Automatic product detection",
-      description: "Classify products using titles, product types and tags.",
-      checked: autoDetect,
-      change: setAutoDetect,
-    },
-  ];
+  const chipLabel = (key) =>
+    key === "all"
+      ? `All ${total}`
+      : `${STATUS[key].label} ${countStatus(key)}`;
 
   return (
-    <s-page heading="Vibecheck Dashboard">
-      <s-section>
-        <s-box padding="large" borderRadius="large" background="subdued">
-          <s-stack direction="block" gap="base">
-            <s-heading>Virtual try-on, made for your store</s-heading>
-            <s-paragraph>
-              Detect products from your Shopify catalog and prepare the
-              appropriate virtual try-on experience.
-            </s-paragraph>
-            <s-stack direction="inline" gap="base">
-              <s-button
-                variant="primary"
-                onClick={() => navigate("/camera-test")}
-              >
-                Test live glasses
-              </s-button>
-              <s-button onClick={() => navigate("/app/additional")}>
-                More app tools
-              </s-button>
-            </s-stack>
-          </s-stack>
-        </s-box>
-      </s-section>
+    <s-page heading="Home" inlineSize="large">
+      <div className="vc">
+        <header className="vc-header">
+          <div>
+            <h1 className="vc-title">Dashboard</h1>
+            <p className="vc-subtitle">
+              Welcome back, {shopName}. Manage virtual try-on for your catalog.
+            </p>
+          </div>
+          <div className="vc-actions">
+            <button
+              type="button"
+              className="vc-btn vc-btn--primary"
+              onClick={() => navigate("/camera-test")}
+            >
+              <Plus /> Open try-on
+            </button>
+            <button
+              type="button"
+              className="vc-btn vc-btn--outline"
+              onClick={() => revalidator.revalidate()}
+              disabled={revalidator.state === "loading"}
+            >
+              <Refresh />
+              {revalidator.state === "loading" ? "Syncing…" : "Sync products"}
+            </button>
+          </div>
+        </header>
 
-      <s-section heading="Your product catalog">
         {error ? (
-          <s-banner tone="critical">
+          <div className="vc-alert" role="alert">
             Unable to load products: {error}. Check product access permissions
             and reauthorize the app if required.
-          </s-banner>
+          </div>
         ) : (
-          <>
-            <s-grid
-              gridTemplateColumns="repeat(auto-fit, minmax(150px, 1fr))"
-              gap="base"
+          <div className="vc-grid">
+            <StatCard
+              index={0}
+              hero
+              title="Total products"
+              value={total}
+              note={`${matched} matched to a try-on category`}
+              onOpen={() => showStatus("all")}
+            />
+            <StatCard
+              index={1}
+              title="Live try-on"
+              value={live}
+              note="Lipstick"
+              onOpen={() => showStatus("live")}
+            />
+            <StatCard
+              index={2}
+              title="Prototype"
+              value={prototype}
+              note="Glasses"
+              onOpen={() => showStatus("prototype")}
+            />
+            <StatCard
+              index={3}
+              title="Coming soon"
+              value={soon}
+              note="Headbands and clothing"
+              onOpen={() => showStatus("soon")}
+            />
+
+            <section className="vc-card vc-span-2" style={{ "--i": 4 }}>
+              <div className="vc-card__head">
+                <h2 className="vc-card__title">Try-ons, last 7 days</h2>
+                <Link to="/app/analytics" className="vc-link">
+                  View analytics
+                </Link>
+              </div>
+              <BarChart
+                data={week && recentTryOns.length > 0 ? week.counts : null}
+                labels={week ? week.labels : undefined}
+                loading={!week}
+                emptyText="No try-on activity yet. Sessions appear here once shoppers use try-on on your store."
+              />
+            </section>
+
+            <section className="vc-card" style={{ "--i": 5 }}>
+              <div className="vc-card__head">
+                <h2 className="vc-card__title">Quick test</h2>
+              </div>
+              <p className="vc-quick__big">Try it on yourself</p>
+              <p className="vc-quick__sub">
+                Open the live camera page to see exactly what your customers
+                will see.
+              </p>
+              <button
+                type="button"
+                className="vc-btn vc-btn--primary vc-btn--wide"
+                onClick={() => navigate("/camera-test")}
+              >
+                <Camera /> Open try-on
+              </button>
+            </section>
+
+            <section className="vc-card" style={{ "--i": 6 }}>
+              <div className="vc-card__head">
+                <h2 className="vc-card__title">Categories</h2>
+                <Link to="/app/configuration" className="vc-link">
+                  Configure
+                </Link>
+              </div>
+              <ul className="vc-list">
+                {CATEGORIES.map((category) => {
+                  const key = statusKeyFor(category.name);
+                  const count = items.filter(
+                    (item) => item.category === category.name
+                  ).length;
+                  return (
+                    <li className="vc-row" key={category.name}>
+                      <span
+                        className={`vc-row__icon${
+                          key === "soon"
+                            ? " vc-row__icon--soon"
+                            : key === "prototype"
+                              ? " vc-row__icon--proto"
+                              : ""
+                        }`}
+                      >
+                        {category.name[0]}
+                      </span>
+                      <div className="vc-row__body">
+                        <div className="vc-row__title">{category.name}</div>
+                        <div className="vc-row__meta">
+                          {count} {count === 1 ? "product" : "products"}
+                        </div>
+                      </div>
+                      <StatusPill status={key} />
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+
+            <section
+              className="vc-card vc-span-2"
+              style={{ "--i": 7 }}
+              ref={productsRef}
             >
-              <s-grid-item>
-                <s-box padding="base" border="base" borderRadius="large">
-                  <s-heading>Total products loaded</s-heading>
-                  <s-text>{products.length}</s-text>
-                </s-box>
-              </s-grid-item>
-              <s-grid-item>
-                <s-box padding="base" border="base" borderRadius="large">
-                  <s-heading>Categories detected</s-heading>
-                  <s-text>{detectedCount}</s-text>
-                </s-box>
-              </s-grid-item>
-              <s-grid-item>
-                <s-box padding="base" border="base" borderRadius="large">
-                  <s-heading>Unsupported products</s-heading>
-                  <s-text>{unsupportedCount}</s-text>
-                </s-box>
-              </s-grid-item>
-            </s-grid>
+              <div className="vc-card__head">
+                <h2 className="vc-card__title">Products</h2>
+              </div>
 
-            <s-stack direction="inline" gap="base">
-              {[
-                "All",
-                "Glasses",
-                "Lipstick",
-                "Headbands",
-                "Clothing",
-                "Unsupported",
-              ].map((item) => (
-                <s-button
-                  key={item}
-                  variant={filter === item ? "primary" : "secondary"}
-                  onClick={() => setFilter(item)}
-                >
-                  {item}
-                </s-button>
-              ))}
-            </s-stack>
+              <div className="vc-chips" role="group" aria-label="Filter products">
+                {FILTERS.filter((key) => key === "all" || countStatus(key) > 0).map(
+                  (key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className="vc-chip"
+                      aria-pressed={filter === key}
+                      onClick={() => setFilter(key)}
+                    >
+                      {chipLabel(key)}
+                    </button>
+                  )
+                )}
+              </div>
 
-            {!autoDetect && (
-              <s-banner tone="info">
-                Automatic detection is disabled. Products are shown as
-                unclassified until you enable detection again.
-              </s-banner>
-            )}
+              {truncated ? (
+                <p className="vc-note">Showing the first {total} products.</p>
+              ) : null}
 
-            {products.length === 0 ? (
-              <s-banner tone="info">
-                No products were returned. Check your Shopify catalog and
-                product access permissions.
-              </s-banner>
-            ) : filteredProducts.length === 0 ? (
-              <s-banner tone="info">
-                No products match this filter.
-              </s-banner>
-            ) : (
-              <s-table>
-                <s-table-header-row>
-                  <s-table-header>Product</s-table-header>
-                  <s-table-header>Product type</s-table-header>
-                  <s-table-header>Detected category</s-table-header>
-                  <s-table-header>Try-on status</s-table-header>
-                  <s-table-header>Action</s-table-header>
-                </s-table-header-row>
-
-                <s-table-body>
-                  {filteredProducts.map((product) => (
-                    <s-table-row key={product.id}>
-                      <s-table-cell>
-                        <s-stack
-                          direction="inline"
-                          gap="base"
-                          align="center"
-                        >
-                          {product.featuredImage?.url ? (
-                            <s-thumbnail
-                              src={product.featuredImage.url}
-                              alt={
-                                product.featuredImage.altText || product.title
-                              }
-                              size="small"
-                            />
-                          ) : null}
-                          <s-stack direction="block" gap="small">
-                            <s-text>{product.title}</s-text>
-                            <s-text>{product.status}</s-text>
-                          </s-stack>
-                        </s-stack>
-                      </s-table-cell>
-
-                      <s-table-cell>
-                        {product.productType || "Not set"}
-                      </s-table-cell>
-
-                      <s-table-cell>
-                        {autoDetect ? product.category : "Unclassified"}
-                      </s-table-cell>
-
-                      <s-table-cell>
-                        {!autoDetect
-                          ? "Detection disabled"
-                          : product.effectReady
-                            ? "Glasses prototype"
-                            : product.category === "Unsupported"
-                              ? "Not supported"
-                              : "Effect in development"}
-                      </s-table-cell>
-
-                      <s-table-cell>
-                        <s-button
-                          variant="primary"
-                          disabled={
-                            !autoDetect ||
-                            product.category === "Unsupported"
-                          }
-                          onClick={() => openTryOn(product)}
-                        >
-                          Try on
-                        </s-button>
-                      </s-table-cell>
-                    </s-table-row>
+              {total === 0 ? (
+                <div className="vc-empty">
+                  <strong>No products yet</strong>
+                  Add products in Shopify, then press Sync products.
+                </div>
+              ) : visible.length === 0 ? (
+                <div className="vc-empty">No products in this view.</div>
+              ) : (
+                <ul className="vc-list vc-scroll">
+                  {visible.map((product) => (
+                    <li className="vc-row" key={product.id}>
+                      {product.featuredImage?.url ? (
+                        <img
+                          className="vc-thumb"
+                          src={product.featuredImage.url}
+                          alt={product.featuredImage.altText || product.title}
+                          loading="lazy"
+                        />
+                      ) : (
+                        <span className="vc-thumb" />
+                      )}
+                      <div className="vc-row__body">
+                        <div className="vc-row__title">{product.title}</div>
+                        <div className="vc-row__meta">{product.category}</div>
+                      </div>
+                      <StatusPill status={product.status} />
+                      <button
+                        type="button"
+                        className="vc-btn vc-btn--ghost"
+                        disabled={product.category === "Unsupported"}
+                        onClick={() => openTryOn(product)}
+                      >
+                        Try on
+                      </button>
+                    </li>
                   ))}
-                </s-table-body>
-              </s-table>
-            )}
-          </>
+                </ul>
+              )}
+            </section>
+
+            <section className="vc-card" style={{ "--i": 8 }}>
+              <div className="vc-card__head">
+                <h2 className="vc-card__title">Catalog coverage</h2>
+              </div>
+              <DonutChart
+                centerValue={`${livePct}%`}
+                centerLabel="of products live"
+                segments={[
+                  { label: "Live", value: live, color: "#0a3622" },
+                  { label: "In development", value: prototype + soon, color: "#2f9e5f" },
+                  { label: "Not supported", value: unsupported, color: "hatch" },
+                ]}
+              />
+            </section>
+
+            <section className="vc-card vc-dark" style={{ "--i": 9 }}>
+              <div>
+                <div className="vc-card__head">
+                  <h2 className="vc-card__title">Storefront</h2>
+                </div>
+                <p className="vc-dark__text">
+                  Add the Vibecheck block to your product page in the theme
+                  editor so customers can try products on.
+                </p>
+              </div>
+              {themeEditorUrl ? (
+                <a
+                  className="vc-btn vc-btn--light vc-btn--wide"
+                  href={themeEditorUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Open theme editor
+                </a>
+              ) : null}
+            </section>
+          </div>
         )}
-      </s-section>
-
-      <s-section heading="Try-on categories">
-        <s-grid
-          gridTemplateColumns="repeat(auto-fit, minmax(220px, 1fr))"
-          gap="base"
-        >
-          {categories.map((category) => (
-            <s-grid-item key={category.name}>
-              <s-box padding="base" border="base" borderRadius="large">
-                <s-stack direction="block" gap="small">
-                  <s-heading>
-                    {category.icon} {category.name}
-                  </s-heading>
-                  <s-paragraph>{category.description}</s-paragraph>
-                  <s-badge
-                    color={category.name === "Glasses" ? "success" : "warning"}
-                  >
-                    {category.status}
-                  </s-badge>
-                </s-stack>
-              </s-box>
-            </s-grid-item>
-          ))}
-        </s-grid>
-      </s-section>
-
-      <s-section heading="Try-on settings">
-        <s-stack direction="block" gap="base">
-          {settings.map((setting) => (
-            <s-box
-              key={setting.title}
-              padding="base"
-              border="base"
-              borderRadius="large"
-            >
-              <s-stack direction="inline" gap="base" align="center">
-                <s-stack direction="block" gap="small">
-                  <s-heading>{setting.title}</s-heading>
-                  <s-paragraph>{setting.description}</s-paragraph>
-                </s-stack>
-                <s-spacer />
-                <s-switch
-                  checked={setting.checked}
-                  onChange={(event) =>
-                    setting.change(event.currentTarget.checked)
-                  }
-                />
-              </s-stack>
-            </s-box>
-          ))}
-        </s-stack>
-
-        <s-banner tone="info">
-          These settings currently live in the dashboard session only. They
-          are not yet saved or connected to the storefront extension.
-        </s-banner>
-      </s-section>
-
-      <s-section heading="Development status">
-        <s-banner tone="success">
-          MediaPipe face tracking and the basic glasses prototype are available
-          on the camera test page.
-        </s-banner>
-        <s-banner tone="info">
-          Detection uses product titles, product types and tags. Lipstick,
-          headband and clothing effects are still in development.
-        </s-banner>
-      </s-section>
-
-      <s-section slot="aside" heading="Development roadmap">
-        <s-unordered-list>
-          <s-list-item>
-            Improve glasses alignment and add real product assets.
-          </s-list-item>
-          <s-list-item>
-            Connect detected products to their matching try-on effects.
-          </s-list-item>
-          <s-list-item>
-            Develop lipstick, headband and clothing overlays.
-          </s-list-item>
-          <s-list-item>
-            Save dashboard settings and connect the storefront.
-          </s-list-item>
-        </s-unordered-list>
-      </s-section>
+      </div>
     </s-page>
   );
 }

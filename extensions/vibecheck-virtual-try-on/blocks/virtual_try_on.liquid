@@ -15,6 +15,10 @@
   data-variant-id="{{ product.selected_or_first_available_variant.id }}"
   data-variant-title="{{ product.selected_or_first_available_variant.title | escape }}"
   data-variant-options="{{ product.selected_or_first_available_variant.options | join: ' / ' | escape }}"
+  data-customer-id="{% if customer %}{{ customer.id }}{% endif %}"
+  data-customer-first-name="{% if customer %}{{ customer.first_name | escape }}{% endif %}"
+  data-customer-last-name="{% if customer %}{{ customer.last_name | escape }}{% endif %}"
+  data-customer-email="{% if customer %}{{ customer.email | escape }}{% endif %}"
 >
   <script type="application/json" data-vibecheck-product-json>
     {{ product | json }}
@@ -160,7 +164,7 @@
 
         <div class="vibecheck-media-frame">
           <video class="vibecheck-video" data-vibecheck-video autoplay playsinline muted hidden></video>
-          <img class="vibecheck-image" data-vibecheck-image alt="Your photo preview" hidden>
+          <img class="vibecheck-image" data-vibecheck-image alt="Your photo preview" width="640" height="480" hidden>
         </div>
 
         <div class="vibecheck-preview-actions">

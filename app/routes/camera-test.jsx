@@ -1,3 +1,4 @@
+import { trackTryOn } from "../utils/tryon-tracker";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import {
@@ -280,8 +281,55 @@ function createFullInnerLipPath(landmarks, width, height) {
 }
 
 // ============================================================================
-// ADVANCED COSMETIC MAKEUP RENDERER (FEATHERED & MULTI-FINISH)
+// REALISTIC LIPSTICK RENDERER
+// ----------------------------------------------------------------------------
+// Why the old version looked "painted on":
+//   1. It filled a flat colour with `multiply` and clipped it with a hard
+//      vector edge -> visible sticker outline, no feathering.
+//   2. `multiply` + low-alpha `soft-light` darkens everything and flattens the
+//      lip's own shading, so creases / light / shadow disappeared.
+//
+// How this version works:
+//   1. Copy the lip area of the current frame into a small offscreen canvas.
+//   2. Re-colour it with the `color` blend mode (takes hue+saturation from the
+//      shade, KEEPS the lip's real brightness & texture), then add depth with
+//      a light `multiply` / `soft-light` pass depending on shade darkness.
+//   3. Add the finish (gloss / satin / shimmer) inside that layer.
+//   4. Cut the layer with a SOFT (feathered) lip mask - teeth protected when
+//      the mouth is open - and composite it back onto the frame.
 // ============================================================================
+let _lipLayerCanvas = null;
+let _lipMaskCanvas = null;
+
+function getScratchCanvas(existing, w, h) {
+  const c = existing || document.createElement("canvas");
+  if (c.width !== w || c.height !== h) {
+    c.width = w;
+    c.height = h;
+  }
+  return c;
+}
+
+// Soft-edged fill that works in every browser (no ctx.filter needed):
+// the shape is drawn far off-canvas and only its blurred SHADOW lands here.
+function fillSoftPath(c, path, blurSigma, op, offsetX, offsetY, far) {
+  c.save();
+  c.globalCompositeOperation = op;
+  c.translate(offsetX, offsetY);
+  c.translate(-far, 0);
+  c.shadowColor = "rgba(255,255,255,1)";
+  c.shadowBlur = Math.max(0, blurSigma * 2); // canvas shadowBlur = 2 x sigma
+  c.shadowOffsetX = far;
+  c.shadowOffsetY = 0;
+  c.fillStyle = "#fff";
+  c.fill(path);
+  c.restore();
+}
+
+function relativeLuminance(rgb) {
+  return (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255;
+}
+
 function drawLipstickEnhanced(
   ctx,
   landmarks,
@@ -291,7 +339,7 @@ function drawLipstickEnhanced(
   finish = "matte",
   intensity = 0.75
 ) {
-  if (!ctx || !landmarks || landmarks.length < 468) return;
+  if (!ctx || !landmarks || landmarks.length < 468 || intensity <= 0.001) return;
 
   const pTopOuter = landmarks[LM_UPPER_CENTER_OUTER];
   const pBottomOuter = landmarks[LM_LOWER_CENTER_OUTER];
@@ -299,178 +347,184 @@ function drawLipstickEnhanced(
   const pBottomInner = landmarks[LM_LOWER_CENTER_INNER];
   const pLeftCorner = landmarks[LM_CORNER_LEFT];
   const pRightCorner = landmarks[LM_CORNER_RIGHT];
-
-  if (!pTopOuter || !pBottomOuter || !pTopInner || !pBottomInner) return;
+  if (!pTopOuter || !pBottomOuter || !pTopInner || !pBottomInner || !pLeftCorner || !pRightCorner) return;
 
   const outerPath = createFullOuterLipPath(landmarks, width, height);
   if (!outerPath) return;
 
-  // Compute mouth opening geometry
+  // ---- Mouth geometry ------------------------------------------------------
   const innerGapY = Math.abs(pBottomInner.y - pTopInner.y) * height;
   const totalLipHeight = Math.abs(pBottomOuter.y - pTopOuter.y) * height;
   const mouthOpen = innerGapY > 3.5 && innerGapY / Math.max(totalLipHeight, 1) > 0.12;
+  const innerPath = mouthOpen ? createFullInnerLipPath(landmarks, width, height) : null;
 
-  const innerPath = mouthOpen
-    ? createFullInnerLipPath(landmarks, width, height)
-    : null;
+  const lipWidthPx = Math.hypot(
+    (pRightCorner.x - pLeftCorner.x) * width,
+    (pRightCorner.y - pLeftCorner.y) * height
+  );
+  const lipAngle = Math.atan2(
+    (pRightCorner.y - pLeftCorner.y) * height,
+    (pRightCorner.x - pLeftCorner.x) * width
+  );
 
-  const rgb = hexToRgb(color);
-  const colorStr = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+  // ---- Bounding box of the lips (all work happens in this small area) -----
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const idx of [...UPPER_LIP_OUTER, ...LOWER_LIP_OUTER]) {
+    const p = landmarks[idx];
+    if (!p) continue;
+    minX = Math.min(minX, p.x * width);
+    maxX = Math.max(maxX, p.x * width);
+    minY = Math.min(minY, p.y * height);
+    maxY = Math.max(maxY, p.y * height);
+  }
+  if (!isFinite(minX) || maxX - minX < 4 || maxY - minY < 2) return;
 
-  ctx.save();
+  const pad = Math.max(8, lipWidthPx * 0.2);
+  const bx = Math.max(0, Math.floor(minX - pad));
+  const by = Math.max(0, Math.floor(minY - pad));
+  const bw = Math.min(width, Math.ceil(maxX + pad)) - bx;
+  const bh = Math.min(height, Math.ceil(maxY + pad)) - by;
+  if (bw < 4 || bh < 4) return;
 
-  // Create clipping mask: Outer lips minus Inner lips (protects teeth)
-  const clipMask = new Path2D();
-  clipMask.addPath(outerPath);
+  const rgbRaw = hexToRgb(color);
+  // Tame over-saturated swatches so the result looks like a real stain
+  const grayRaw = 0.2126 * rgbRaw.r + 0.7152 * rgbRaw.g + 0.0722 * rgbRaw.b;
+  const SAT = 0.80; // 1 = full swatch saturation, lower = more natural
+  const rgb = {
+    r: grayRaw + (rgbRaw.r - grayRaw) * SAT,
+    g: grayRaw + (rgbRaw.g - grayRaw) * SAT,
+    b: grayRaw + (rgbRaw.b - grayRaw) * SAT,
+  };
+  const colorStr = `rgb(${Math.round(rgb.r)}, ${Math.round(rgb.g)}, ${Math.round(rgb.b)})`;
+  const shadeLum = relativeLuminance(rgb); // 0 = very dark, 1 = very light
+  const darkness = 1 - shadeLum;
+
+  // Edge softness scales with lip size (about 1-3px, like a real lip line).
+  const feather = Math.min(2.0, Math.max(0.7, lipWidthPx * 0.012));
+  const FAR = Math.max(4000, bw * 2);
+
+  // ---- 1. SOFT MASK (outer lips minus open mouth) ---------------------------
+  const maskCanvas = (_lipMaskCanvas = getScratchCanvas(_lipMaskCanvas, bw, bh));
+  const mctx = maskCanvas.getContext("2d");
+  mctx.setTransform(1, 0, 0, 1, 0, 0);
+  mctx.globalCompositeOperation = "source-over";
+  mctx.clearRect(0, 0, bw, bh);
+  fillSoftPath(mctx, outerPath, feather, "source-over", -bx, -by, FAR);
   if (innerPath) {
-    clipMask.addPath(innerPath);
-    ctx.clip(clipMask, "evenodd");
-  } else {
-    ctx.clip(clipMask);
+    // slightly tighter feather inside so teeth/tongue stay clean
+    fillSoftPath(mctx, innerPath, feather * 0.8, "destination-out", -bx, -by, FAR);
   }
 
-  // --- LAYER 1: Base Dye & Crease-preserving Pigment (Multiply) ---
-  const baseAlpha =
-    finish === "sheer"
-      ? 0.38 * intensity
-      : finish === "glossy"
-      ? 0.52 * intensity
-      : 0.62 * intensity;
+  // ---- 2. COLOUR LAYER built from the real lip pixels ---------------------
+  const layerCanvas = (_lipLayerCanvas = getScratchCanvas(_lipLayerCanvas, bw, bh));
+  const lctx = layerCanvas.getContext("2d");
+  lctx.setTransform(1, 0, 0, 1, 0, 0);
+  lctx.globalCompositeOperation = "source-over";
+  lctx.globalAlpha = 1;
+  lctx.clearRect(0, 0, bw, bh);
+  lctx.drawImage(ctx.canvas, bx, by, bw, bh, 0, 0, bw, bh);
 
-  ctx.globalCompositeOperation = "multiply";
-  ctx.globalAlpha = baseAlpha;
-  ctx.fillStyle = colorStr;
-  ctx.fillRect(0, 0, width, height);
+  // Per-finish recipe: how strongly to recolour / add depth.
+  const recipe = {
+    matte:   { hue: 0.55, mult: 0.30, tone: 0.20 },
+    satin:   { hue: 0.50, mult: 0.26, tone: 0.20 },
+    glossy:  { hue: 0.46, mult: 0.24, tone: 0.18 },
+    shimmer: { hue: 0.48, mult: 0.25, tone: 0.18 },
+    sheer:   { hue: 0.30, mult: 0.12, tone: 0.12 },
+  }[finish] || { hue: 0.5, mult: 0.25, tone: 0.18 };
 
-  // --- LAYER 2: Vibrant Tone Layer (Soft-Light or Source-Atop) ---
-  const toneAlpha =
-    finish === "matte"
-      ? 0.42 * intensity
-      : finish === "glossy"
-      ? 0.30 * intensity
-      : finish === "satin"
-      ? 0.38 * intensity
-      : finish === "shimmer"
-      ? 0.36 * intensity
-      : 0.18 * intensity;
+  // (a) Hue + saturation of the shade, brightness/texture of the real lips.
+  lctx.globalCompositeOperation = "color";
+  lctx.globalAlpha = recipe.hue;
+  lctx.fillStyle = colorStr;
+  lctx.fillRect(0, 0, bw, bh);
 
-  ctx.globalCompositeOperation = "soft-light";
-  ctx.globalAlpha = toneAlpha;
-  ctx.fillStyle = colorStr;
-  ctx.fillRect(0, 0, width, height);
+  // (b) Depth: multiply keeps the lip's own tone showing through (natural stain)
+  lctx.globalCompositeOperation = "multiply";
+  lctx.globalAlpha = recipe.mult * (0.6 + darkness * 0.8);
+  lctx.fillStyle = colorStr;
+  lctx.fillRect(0, 0, bw, bh);
+  if (shadeLum > 0.55) {
+    lctx.globalCompositeOperation = "soft-light";
+    lctx.globalAlpha = 0.35;
+    lctx.fillRect(0, 0, bw, bh);
+  }
 
-  // --- LAYER 3: Finish-Specific Highlights & Texture ---
-  const lowerCenterX =
-  ((pBottomOuter.x + pBottomInner.x) / 2) * width;
+  // (c) Richness: a final soft-light pass keeps colour vibrant, not muddy.
+  lctx.globalCompositeOperation = "soft-light";
+  lctx.globalAlpha = recipe.tone;
+  lctx.fillStyle = colorStr;
+  lctx.fillRect(0, 0, bw, bh);
 
-const lowerCenterY =
-  ((pBottomOuter.y + pBottomInner.y) / 2) * height;
-  const lipWidthPx = Math.abs((pRightCorner?.x || 1) - (pLeftCorner?.x || 0)) * width;
+  // ---- 3. FINISH (highlights live INSIDE the layer so edges stay soft) ----
+  lctx.save();
+  lctx.translate(-bx, -by);
+  const lowerCenterX = ((pBottomOuter.x + pBottomInner.x) / 2) * width;
+  const lowerCenterY = ((pBottomOuter.y + pBottomInner.y) / 2) * height;
+  const lowerLipThickness = Math.max(
+    2,
+    Math.abs(pBottomOuter.y - pBottomInner.y) * height
+  );
 
+  // Elliptical radial gradient aligned with the lip (follows head tilt).
+  const softBlob = (cx, cy, rx, ry, peak) => {
+    lctx.save();
+    lctx.translate(cx, cy);
+    lctx.rotate(lipAngle);
+    lctx.scale(1, Math.max(0.05, ry / rx));
+    const g = lctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+    g.addColorStop(0, `rgba(255,255,255,${peak})`);
+    g.addColorStop(0.45, `rgba(255,255,255,${peak * 0.35})`);
+    g.addColorStop(1, "rgba(255,255,255,0)");
+    lctx.fillStyle = g;
+    lctx.beginPath();
+    lctx.arc(0, 0, rx, 0, Math.PI * 2);
+    lctx.fill();
+    lctx.restore();
+  };
+
+  lctx.globalCompositeOperation = "screen";
   if (finish === "glossy") {
-    // 3D Glass Plump Specular Sheen on lower lip
-    ctx.globalCompositeOperation = "screen";
-    ctx.globalAlpha = 0.48 * intensity;
-
-    const glossRadiusX = Math.max(lipWidthPx * 0.22, 10);
-    const glossRadiusY = Math.max(totalLipHeight * 0.28, 4);
-
-    const grad = ctx.createRadialGradient(
-      lowerCenterX,
-      lowerCenterY,
-      1,
-      lowerCenterX,
-      lowerCenterY,
-      glossRadiusX
-    );
-    grad.addColorStop(0, "rgba(255, 255, 255, 0.75)");
-    grad.addColorStop(0.5, "rgba(255, 255, 255, 0.25)");
-    grad.addColorStop(1, "rgba(255, 255, 255, 0)");
-
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.ellipse(
-      lowerCenterX,
-      lowerCenterY + 1,
-      glossRadiusX,
-      glossRadiusY,
-      0,
-      0,
-      Math.PI * 2
-    );
-    ctx.fill();
-
-    // Subtle Cupid's Bow specular sheen
-    const cupidX = pTopOuter.x * width;
-    const cupidY = pTopOuter.y * height;
-    const cupidGrad = ctx.createRadialGradient(
-      cupidX,
-      cupidY,
-      0.5,
-      cupidX,
-      cupidY,
-      glossRadiusX * 0.5
-    );
-    cupidGrad.addColorStop(0, "rgba(255, 255, 255, 0.55)");
-    cupidGrad.addColorStop(1, "rgba(255, 255, 255, 0)");
-    ctx.fillStyle = cupidGrad;
-    ctx.beginPath();
-    ctx.arc(cupidX, cupidY, glossRadiusX * 0.4, 0, Math.PI * 2);
-    ctx.fill();
+    lctx.globalAlpha = 1;
+    // main wet highlight on lower lip, slightly off-centre like real light
+    softBlob(lowerCenterX - lipWidthPx * 0.05, lowerCenterY - lowerLipThickness * 0.1,
+      lipWidthPx * 0.2, lowerLipThickness * 0.38, 0.30);
+    // smaller secondary glint
+    softBlob(lowerCenterX + lipWidthPx * 0.16, lowerCenterY, lipWidthPx * 0.08,
+      lowerLipThickness * 0.22, 0.20);
+    // faint sheen on upper lip / cupid's bow
+    softBlob(pTopOuter.x * width, pTopOuter.y * height + lowerLipThickness * 0.25,
+      lipWidthPx * 0.12, lowerLipThickness * 0.2, 0.14);
   } else if (finish === "satin") {
-    // Elegant soft-focus creamy lustre
-    ctx.globalCompositeOperation = "screen";
-    ctx.globalAlpha = 0.20 * intensity;
-    const grad = ctx.createRadialGradient(
-      lowerCenterX,
-      lowerCenterY,
-      2,
-      lowerCenterX,
-      lowerCenterY,
-      lipWidthPx * 0.3
-    );
-    grad.addColorStop(0, "rgba(255, 255, 255, 0.5)");
-    grad.addColorStop(1, "rgba(255, 255, 255, 0)");
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.ellipse(
-      lowerCenterX,
-      lowerCenterY,
-      lipWidthPx * 0.28,
-      totalLipHeight * 0.25,
-      0,
-      0,
-      Math.PI * 2
-    );
-    ctx.fill();
+    lctx.globalAlpha = 1;
+    softBlob(lowerCenterX, lowerCenterY, lipWidthPx * 0.26, lowerLipThickness * 0.45, 0.14);
   } else if (finish === "shimmer") {
-    // Micro-pearl shimmering reflection
-    ctx.globalCompositeOperation = "screen";
-    ctx.globalAlpha = 0.35 * intensity;
-    const numSparkles = 14;
-    for (let i = 0; i < numSparkles; i++) {
-      const offsetX = ((i - numSparkles / 2) / (numSparkles / 2)) * (lipWidthPx * 0.3);
-      const offsetY = Math.sin(i * 1.8) * (totalLipHeight * 0.15);
-      const radius = 1.0 + (i % 3) * 0.8;
-      ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
-      ctx.beginPath();
-      ctx.arc(lowerCenterX + offsetX, lowerCenterY + offsetY, radius, 0, Math.PI * 2);
-      ctx.fill();
+    lctx.globalAlpha = 1;
+    softBlob(lowerCenterX, lowerCenterY, lipWidthPx * 0.24, lowerLipThickness * 0.4, 0.10);
+    // deterministic micro-pearls (no random -> no flicker between frames)
+    const n = 26;
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n;
+      const px = pLeftCorner.x * width + (pRightCorner.x - pLeftCorner.x) * width * (0.12 + 0.76 * t);
+      const py = lowerCenterY + Math.sin(i * 12.9898) * lowerLipThickness * 0.28;
+      const r = 0.6 + ((i * 7) % 5) * 0.28;
+      lctx.fillStyle = `rgba(255,255,255,${0.15 + ((i * 3) % 4) * 0.06})`;
+      lctx.beginPath();
+      lctx.arc(px, py, r, 0, Math.PI * 2);
+      lctx.fill();
     }
   }
+  lctx.restore();
 
-  // --- LAYER 4: Soft-edge Feathering around vermilion border ---
-  ctx.restore(); // Exit clip
+  // ---- 4. APPLY SOFT MASK, then composite onto the frame -----------------
+  lctx.globalCompositeOperation = "destination-in";
+  lctx.globalAlpha = 1;
+  lctx.drawImage(maskCanvas, 0, 0);
 
-  // Subtle feathered perimeter stroke to avoid sharp vector edges
   ctx.save();
   ctx.globalCompositeOperation = "source-over";
-  ctx.globalAlpha = 0.16 * intensity;
-  ctx.strokeStyle = colorStr;
-  ctx.lineWidth = 1.6;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.stroke(outerPath);
+  ctx.globalAlpha = Math.min(1, Math.max(0, intensity * 0.9));
+  ctx.drawImage(layerCanvas, bx, by);
   ctx.restore();
 }
 
@@ -597,6 +651,13 @@ export default function CameraTest() {
     handle: initialProductHandle,
     image: initialProductImage,
   });
+
+    useEffect(() => {
+    if (embedded) {
+      trackTryOn("tryon_opened", { id: initialProductId, title: initialProductTitle });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [catalog, setCatalog] = useState([]);
   const [productVariants, setProductVariants] = useState(parsedUrlVariants);
@@ -982,6 +1043,7 @@ const initVisionTasks = useCallback(async () => {
         runningRef.current = true;
         startingRef.current = false;
         setCameraReady(true);
+        trackTryOn("camera_started");
         setStatus("Ready! Smooth tracking active.");
 
         // Initialize vision tasks in background without halting the camera
@@ -1509,6 +1571,7 @@ const renderUploadedPhoto = useCallback(async (image) => {
       return;
     }
     const objUrl = URL.createObjectURL(file);
+    trackTryOn("photo_uploaded");
     const img = new Image();
     uploadRequestRef.current += 1;
     uploadImageRef.current = img;
@@ -1533,6 +1596,7 @@ const renderUploadedPhoto = useCallback(async (image) => {
   };
 
   const selectVariant = (item) => {
+    trackTryOn("shade_selected", { id: currentProduct.id, title: currentProduct.title });
     setActiveVariantId(item.id);
     const effectiveHex = colorCacheRef.current[item.image] || item.hex;
     applyShade(effectiveHex);
@@ -1674,16 +1738,6 @@ const renderUploadedPhoto = useCallback(async (image) => {
               </button>
             )}
           </div>
-          <button
-            type="button"
-            onClick={toggleFullscreen}
-            title="Fullscreen"
-            aria-label="Toggle fullscreen"
-            className="vibe-press"
-            style={styles.glassBtn}
-          >
-            <Ico n="expand" />
-          </button>
         </header>
 
         {/* ------------------------------------------------------------- */}
@@ -1762,10 +1816,6 @@ const renderUploadedPhoto = useCallback(async (image) => {
 
           {/* Control rail: one quiet capsule instead of five floating discs */}
           <aside style={styles.rail} aria-label="Camera controls">
-            <button type="button" className="vibe-press" onClick={toggleFlipCamera}
-              title="Flip camera" aria-label="Flip camera" style={styles.railBtn}>
-              <Ico n="flip" />
-            </button>
             <button type="button" className="vibe-press" onClick={handleZoomToggle}
               title={`Zoom ${zoom.toFixed(1)}x`} aria-label="Change zoom"
               style={{ ...styles.railBtn, ...(zoom > 1.0 ? styles.railBtnOn : {}) }}>

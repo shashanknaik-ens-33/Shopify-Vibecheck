@@ -1,4 +1,3 @@
-
 (function () {
   "use strict";
 
@@ -58,6 +57,21 @@
     let previousBodyOverflow = "";
     let previousFocus = null;
     let photoSource = null;
+    let tryOnSessionIds = [];
+
+    function attachTryOnSessionToProductForms() {
+      if (!tryOnSessionIds.length) return;
+      document.querySelectorAll('form[action*="/cart/add"]').forEach(function (form) {
+        let field = form.querySelector('input[name="properties[_vibecheck_session]"]');
+        if (!field) {
+          field = document.createElement("input");
+          field.type = "hidden";
+          field.name = "properties[_vibecheck_session]";
+          form.appendChild(field);
+        }
+        field.value = tryOnSessionIds.join(",");
+      });
+    }
 
     try {
       shopifyProduct = productJsonElement
@@ -315,6 +329,9 @@
       previousFocus = document.activeElement;
       previousBodyOverflow = document.body.style.overflow;
 
+      // Mount on <body> so theme headers / transformed ancestors can't cover or clip it.
+      if (modal.parentElement !== document.body) document.body.appendChild(modal);
+
       modal.hidden = false;
       modal.classList.add("is-open");
       modal.setAttribute("aria-hidden", "false");
@@ -434,6 +451,12 @@
         experienceFrame.contentWindow.postMessage(
           {
             type: "VIBECHECK_DATA",
+            customer: {
+              id: root.dataset.customerId || "",
+              firstName: root.dataset.customerFirstName || "",
+              lastName: root.dataset.customerLastName || "",
+              email: root.dataset.customerEmail || ""
+            },
             product: {
               ...product,
               variants: shopifyProduct?.variants || []
@@ -715,6 +738,29 @@
         }
       } else if (event.data.type === "VIBECHECK_CLOSE") {
         closeModal();
+      } else if (event.data.type === "VIBECHECK_SESSION") {
+        if (!experienceFrame || event.source !== experienceFrame.contentWindow) return;
+        var sessionId = String(event.data.sessionId || "").slice(0, 64);
+        if (!sessionId) return;
+        if (tryOnSessionIds.indexOf(sessionId) === -1) tryOnSessionIds.push(sessionId);
+        tryOnSessionIds = tryOnSessionIds.slice(-5);
+        attachTryOnSessionToProductForms();
+        fetch("/cart.js")
+          .then(function (response) { return response.json(); })
+          .then(function (cart) {
+            var existing = String((cart.attributes || {}).vibecheck_session || "")
+              .split(",")
+              .filter(Boolean);
+            if (existing.indexOf(sessionId) === -1) existing.push(sessionId);
+            return fetch("/cart/update.js", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                attributes: { vibecheck_session: existing.slice(-5).join(",") }
+              })
+            });
+          })
+          .catch(function () {});
       }
     });
 

@@ -1,34 +1,105 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// Vibecheck database schema (PostgreSQL).
+// Set DATABASE_URL in your .env and in Render's Environment tab.
 
 generator client {
   provider = "prisma-client-js"
 }
 
-// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
-// enough when changing adapters.
-// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
-  provider = "sqlite"
-  url      = "file:dev.sqlite"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model Session {
-  id            String    @id
-  shop          String
-  state         String
-  isOnline      Boolean   @default(false)
-  scope         String?
-  expires       DateTime?
-  accessToken   String
-  userId        BigInt?
-  firstName     String?
-  lastName      String?
-  email         String?
-  accountOwner  Boolean   @default(false)
-  locale        String?
-  collaborator  Boolean?  @default(false)
-  emailVerified Boolean?  @default(false)
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
   refreshToken        String?
   refreshTokenExpires DateTime?
+}
+
+// One row per thing a shopper does inside the try-on.
+model TryOnEvent {
+  id           String   @id @default(cuid())
+  shop         String
+  event        String
+  sessionId    String
+  visitorId    String
+  productId    String?
+  productTitle String?
+  createdAt    DateTime @default(now())
+
+  @@index([shop, createdAt])
+}
+
+// One row per store order placed by a shopper who used try-on first.
+model TryOnOrder {
+  id              String   @id @default(cuid())
+  shop            String
+  orderId         String
+  orderName       String?
+  customerId      String?
+  customerName    String?
+  customerEmail   String?
+  customerCity    String?
+  customerCountry String?
+  itemSummary     String?
+  totalPrice      Float    @default(0)
+  currency        String?
+  sessionIds      String
+  boughtTriedItem Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  @@unique([shop, orderId])
+  @@index([shop, createdAt])
+}
+
+// A checkout started by a shopper who used try-on. completedAt is set when it becomes an order.
+model TryOnCheckout {
+  id              String    @id @default(cuid())
+  shop            String
+  token           String
+  cartToken       String?
+  sessionIds      String
+  customerId      String?
+  customerName    String?
+  customerEmail   String?
+  customerCity    String?
+  customerCountry String?
+  itemSummary     String?
+  totalPrice      Float     @default(0)
+  currency        String?
+  recoveryUrl     String?
+  completedAt     DateTime?
+  startedAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([shop, token])
+  @@index([shop, updatedAt])
+  @@index([shop, cartToken])
+}
+
+// A shopper we could identify because they were logged in to the store while trying on.
+model TryOnVisitor {
+  id            String   @id @default(cuid())
+  shop          String
+  visitorId     String
+  customerId    String?
+  customerName  String?
+  customerEmail String?
+  updatedAt     DateTime @updatedAt
+
+  @@unique([shop, visitorId])
 }
