@@ -4,6 +4,7 @@ import { authenticate } from "../shopify.server";
 import { getAnalyticsSummary } from "../utils/analytics.server";
 import { getCustomerRows } from "../utils/customers.server";
 import { getSessionRows } from "../utils/sessions.server";
+import { syncRecentTryOnOrders } from "../utils/orders.server";
 import StatCard from "../components/dashboard/StatCard";
 import BarChart from "../components/dashboard/BarChart";
 import DonutChart from "../components/dashboard/DonutChart";
@@ -13,8 +14,9 @@ import { bucketLastSevenDays, timeAgo } from "../components/dashboard/chart-data
 import "../styles/dashboard.css";
 
 export async function loader({ request }) {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const shop = session?.shop ?? "";
+  await syncRecentTryOnOrders(admin, shop);
   const [summary, customers, sessionList] = await Promise.all([
     getAnalyticsSummary(shop),
     getCustomerRows(shop),

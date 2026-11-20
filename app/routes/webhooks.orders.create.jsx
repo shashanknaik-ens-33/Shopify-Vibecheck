@@ -1,5 +1,6 @@
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
+import { findMatchingTryOnSessions } from "../utils/orders.server";
 
 // Runs for every new order. It only stores orders whose cart carries a
 // Vibecheck try-on session id (set by the storefront extension).
@@ -72,6 +73,18 @@ export const action = async ({ request }) => {
         .slice(0, 5);
     }
 
+    const boughtProducts = (payload?.line_items ?? [])
+      .map((item) => item.product_id)
+      .filter(Boolean)
+      .map(String);
+    if (!sessionIds.length) {
+      sessionIds = await findMatchingTryOnSessions(
+        shop,
+        boughtProducts,
+        payload?.created_at || Date.now()
+      );
+    }
+
     if (sessionIds.length) {
       // Only count sessions we actually recorded for this shop.
       const known = await db.tryOnEvent.findMany({
@@ -84,9 +97,6 @@ export const action = async ({ request }) => {
           known
             .filter((row) => row.event === "tryon_opened" && row.productId)
             .map((row) => String(row.productId))
-        );
-        const boughtProducts = (payload.line_items ?? []).map((item) =>
-          String(item.product_id)
         );
         const boughtTriedItem = boughtProducts.some((id) => triedProducts.has(id));
         const customer = payload.customer ?? {};
