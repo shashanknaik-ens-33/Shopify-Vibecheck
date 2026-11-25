@@ -17,11 +17,24 @@ export const action = async ({ request }) => {
     const token = clip(payload?.token ?? payload?.id, 80);
     const attributes = Array.isArray(payload?.note_attributes) ? payload.note_attributes : [];
     const raw = attributes.find((item) => item?.name === "vibecheck_session")?.value;
+    const propertyValues = (payload?.line_items ?? []).flatMap((item) => {
+      if (Array.isArray(item?.properties)) {
+        return item.properties
+          .filter((property) => property?.name === "_vibecheck_session")
+          .map((property) => property.value);
+      }
+      const value = item?.properties?._vibecheck_session;
+      return value ? [value] : [];
+    });
 
-    const sessionIds = String(raw || "")
-      .split(",")
+    // Some checkout paths omit cart note attributes but preserve the product
+    // form property attached by the storefront extension.
+    const sessionIds = [raw, ...propertyValues]
+      .filter(Boolean)
+      .flatMap((value) => String(value).split(","))
       .map((id) => id.trim().slice(0, 64))
       .filter(Boolean)
+      .filter((id, index, ids) => ids.indexOf(id) === index)
       .slice(0, 5);
 
     if (token && sessionIds.length) {
